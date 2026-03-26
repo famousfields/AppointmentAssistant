@@ -45,7 +45,13 @@ export default function JobForm() {
   };
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    let { name, value } = e.target;
+    
+    // Only allow numeric characters for phone field
+    if (name === "phone") {
+      value = value.replace(/\D/g, "");
+    }
+    
     setFormData(prev => ({ ...prev, [name]: value }));
     setErrors(prev => ({ ...prev, [name]: validateField(name, value) }));
   };
@@ -84,34 +90,46 @@ export default function JobForm() {
   const hasErrors = Object.values(errors).some(Boolean);
 
   return (
-    <form onSubmit={handleSubmit} noValidate>
-      <label>Name</label>
-      <input name="name" type="text" required onChange={handleChange} />
-      {errors.name && <div style={{ color: "red" }}>{errors.name}</div>}
+    <form onSubmit={handleSubmit} noValidate className="job-form">
+      <div className="form-group">
+        <label>Name</label>
+        <input name="name" type="text" required onChange={handleChange} />
+        {errors.name && <div className="form-error">{errors.name}</div>}
+      </div>
 
-      <label>Phone</label>
-      <input name="phone" type="tel" required onChange={handleChange} />
-      {errors.phone && <div style={{ color: "red" }}>{errors.phone}</div>}
+      <div className="form-group">
+        <label>Phone</label>
+        <input name="phone" type="tel" inputMode="numeric" pattern="[0-9]*" required onChange={handleChange} value={formData.phone} />
+        {errors.phone && <div className="form-error">{errors.phone}</div>}
+      </div>
 
-      <label>Address</label>
-      <input name="address" type="text" required onChange={handleChange} />
-      {errors.address && <div style={{ color: "red" }}>{errors.address}</div>}
+      <div className="form-group">
+        <label>Address</label>
+        <input name="address" type="text" required onChange={handleChange} />
+        {errors.address && <div className="form-error">{errors.address}</div>}
+      </div>
 
-      <label>Job Type</label>
-      <input name="jobType" type="text" required onChange={handleChange} />
-      {errors.jobType && <div style={{ color: "red" }}>{errors.jobType}</div>}
+      <div className="form-group">
+        <label>Job Type</label>
+        <input name="jobType" type="text" required onChange={handleChange} />
+        {errors.jobType && <div className="form-error">{errors.jobType}</div>}
+      </div>
 
-      <label>Date</label>
-      <input name="jobDate" type="date" required onChange={handleChange} />
-      {errors.jobDate && <div style={{ color: "red" }}>{errors.jobDate}</div>}
+      <div className="form-group">
+        <label>Date</label>
+        <input name="jobDate" type="date" required onChange={handleChange} />
+        {errors.jobDate && <div className="form-error">{errors.jobDate}</div>}
+      </div>
 
-      <label>Comments</label>
-      <textarea name="comments" onChange={handleChange}></textarea>
-      {errors.comments && <div style={{ color: "red" }}>{errors.comments}</div>}
+      <div className="form-group">
+        <label>Comments</label>
+        <textarea name="comments" onChange={handleChange}></textarea>
+        {errors.comments && <div className="form-error">{errors.comments}</div>}
+      </div>
 
-      {errors.submit && <div style={{ color: "red" }}>{errors.submit}</div>}
+      {errors.submit && <div className="form-error-message">{errors.submit}</div>}
 
-      <button type="submit" disabled={hasErrors}>Submit</button>
+      <button type="submit" disabled={hasErrors} className="form-submit-button">Submit</button>
     </form>
   );
 }
