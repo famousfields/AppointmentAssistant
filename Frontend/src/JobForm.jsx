@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-export default function JobForm() {
+export default function JobForm({ currentUser }) {
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -34,10 +34,9 @@ export default function JobForm() {
         return "";
       case "jobDate": {
         if (!value) return "Date is required";
-        const d = new Date(value);
         const today = new Date();
-        today.setHours(0,0,0,0);
-        if (isNaN(d.getTime()) || d < today) return "Date must be today or later";
+        const todayString = today.toISOString().split('T')[0];
+        if (value < todayString) return "Date must be today or later";
         return "";
       }
       case "comments":
@@ -81,7 +80,10 @@ export default function JobForm() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          userId: currentUser?.id ?? null
+        })
       });
 
       const data = await res.json();
@@ -113,6 +115,11 @@ export default function JobForm() {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="job-form">
+      {!currentUser && (
+        <div className="form-error-message">
+          Please log in before creating a job.
+        </div>
+      )}
       <div className="form-group">
         <label>Name</label>
         <input name="name" type="text" required onChange={handleChange} />
@@ -154,7 +161,13 @@ export default function JobForm() {
         <div className="form-success-message">{successMessage}</div>
       )}
 
-      <button type="submit" disabled={hasErrors} className="form-submit-button">Submit</button>
+      <button
+        type="submit"
+        disabled={hasErrors || !currentUser}
+        className="form-submit-button"
+      >
+        Submit
+      </button>
     </form>
   );
 }

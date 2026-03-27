@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-export default function JobsList() {
+export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -10,12 +10,20 @@ export default function JobsList() {
   const [isSavingComments, setIsSavingComments] = useState(false);
 
   useEffect(() => {
+    if (!currentUser) {
+      setLoading(false);
+      setJobs([]);
+      setError("Please log in to view your jobs.");
+      return;
+    }
     fetchJobs();
-  }, []);
+  }, [currentUser]);
 
   const fetchJobs = async () => {
     try {
-      const res = await fetch("http://localhost:5000/jobs");
+      const res = await fetch(
+        `http://localhost:5000/jobs?userId=${encodeURIComponent(currentUser?.id)}`
+      );
       if (!res.ok) throw new Error("Failed to fetch jobs");
       const data = await res.json();
       setJobs(data);

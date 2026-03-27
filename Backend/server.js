@@ -125,7 +125,11 @@ app.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { name, phone, address, jobType, jobDate, comments } = req.body;
+    const { name, phone, address, jobType, jobDate, comments, userId } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: "User ID is required" });
+    }
 
     // Step 1: Check if client already exists
     const getClientQuery = `
@@ -163,11 +167,14 @@ app.post(
       // Function to insert job for a given client_id
       function insertJob(clientId) {
         const jobQuery = `
-          INSERT INTO Jobs (client_id, job_type, job_date, comments, status)
-          VALUES (?, ?, ?, ?, ?)
-        `;
-        db.query(jobQuery, [clientId, jobType, jobDate, comments, "Pending"], (err, result) => {
-          if (err) {
+        INSERT INTO Jobs (client_id, job_type, job_date, comments, status, user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `;
+        db.query(
+          jobQuery,
+          [clientId, jobType, jobDate, comments, "Pending", userId],
+          (err, result) => {
+            if (err) {
             console.error("Error inserting job:", err);
             return res.status(500).json({ error: "Database error" });
           }
@@ -179,15 +186,21 @@ app.post(
 );
 
 app.get("/jobs", (req, res) => {
+  const userId = req.query.userId;
+  if (!userId) {
+    return res.status(401).json({ error: "User ID is required" });
+  }
+
   const query = `
     SELECT j.id, j.job_type, j.job_date, j.comments, j.status,
            c.id AS client_id, c.name, c.phone, c.address
     FROM Jobs j
     JOIN Clients c ON j.client_id = c.id
+    WHERE j.user_id = ?
     ORDER BY j.job_date DESC
     `;
   
-  db.query(query, (err, results) => {
+  db.query(query, [userId], (err, results) => {
     if (err) {
       console.error("Error fetching jobs:", err);
       return res.status(500).json({ error: "Database error" });
