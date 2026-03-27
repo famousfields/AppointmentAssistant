@@ -102,7 +102,7 @@ app.post(
 app.get("/jobs", (req, res) => {
   const query = `
     SELECT j.id, j.job_type, j.job_date, j.comments, j.status,
-           c.name, c.phone, c.address
+           c.id AS client_id, c.name, c.phone, c.address
     FROM Jobs j
     JOIN Clients c ON j.client_id = c.id
     ORDER BY j.job_date DESC
@@ -114,6 +114,59 @@ app.get("/jobs", (req, res) => {
       return res.status(500).json({ error: "Database error" });
     }
     res.json(results);
+  });
+});
+
+app.patch("/jobs/:id/comments", (req, res) => {
+  const { id } = req.params;
+  const { comments } = req.body;
+  const jobId = Number(id);
+
+  if (Number.isNaN(jobId)) {
+    return res.status(400).json({ error: "Invalid job ID" });
+  }
+
+  const trimmed = (comments || "").trim();
+  if (trimmed.length > 500) {
+    return res.status(400).json({ error: "Comments must be 500 characters or less" });
+  }
+
+  const query = "UPDATE Jobs SET comments = ? WHERE id = ?";
+  db.query(query, [trimmed === "" ? null : trimmed, jobId], (err, result) => {
+    if (err) {
+      console.error("Error updating comments:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    res.json({ message: "Comments updated successfully" });
+  });
+});
+
+app.put("/jobs/:id", (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ error: "Status is required" });
+  }
+
+  const validStatuses = ["Pending", "In Progress", "Completed", "Cancelled"];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  const query = "UPDATE Jobs SET status = ? WHERE id = ?";
+  db.query(query, [status, id], (err, result) => {
+    if (err) {
+      console.error("Error updating job:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    res.json({ message: "Job status updated successfully" });
   });
 });
 

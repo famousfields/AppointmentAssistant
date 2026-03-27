@@ -258,3 +258,231 @@
   color: #ef4444;
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
+
+.comments-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.comments-button {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.comments-button:hover {
+  background: #e2e8f0;
+}
+
+.comments-preview {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  max-width: 300px;
+}
+
+.comments-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 20;
+}
+
+.comments-modal {
+  width: min(480px, 100%);
+  background: var(--bg);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 15px 45px rgba(15, 23, 42, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comments-modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.comments-modal-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.comments-modal textarea {
+  width: 100%;
+  min-height: 140px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  font-size: 15px;
+  font-family: inherit;
+  resize: vertical;
+  background: var(--bg);
+}
+
+.comments-modal textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(170, 59, 255, 0.15);
+}
+
+.comments-modal-error {
+  margin: 0;
+  font-size: 13px;
+  color: #b91c1c;
+}
+
+.comments-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.comments-modal-button {
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.comments-modal-button--ghost {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.comments-modal-button--primary {
+  background: var(--accent);
+  color: white;
+}
+
+.comments-modal-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.clients-page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding-inline: 16px;
+  box-sizing: border-box;
+}
+
+.clients-section,
+.client-jobs-section {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  background: var(--bg);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.05);
+}
+
+.clients-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.client-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.2s, transform 0.2s;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.client-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.client-card--active {
+  border-color: var(--accent);
+  background: rgba(170, 59, 255, 0.08);
+}
+
+.client-name {
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-h);
+}
+
+.client-meta {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.client-card-button {
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.client-card-button:hover {
+  opacity: 0.9;
+}
+
+.client-jobs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.client-jobs-count {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.client-jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.client-jobs-table th,
+.client-jobs-table td {
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.client-jobs-table th {
+  font-weight: 600;
+  color: var(--text-h);
+  background: #f3f4f6;
+}
+
+.clients-error {
+  color: #b91c1c;
+}
