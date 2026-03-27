@@ -425,6 +425,16 @@
   background: rgba(170, 59, 255, 0.08);
 }
 
+.client-card--inactive {
+  background: #e5e7eb;
+  color: #0f0f0f;
+}
+
+.client-card--inactive .client-name,
+.client-card--inactive .client-meta {
+  color: #0f0f0f;
+}
+
 .client-name {
   font-weight: 600;
   margin: 0;
@@ -467,6 +477,9 @@
 .client-jobs-table {
   width: 100%;
   border-collapse: collapse;
+  background: transparent;
+  color: var(--text-h);
+  margin-top: 6px;
 }
 
 .client-jobs-table th,
@@ -475,14 +488,34 @@
   padding: 10px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
+  background: transparent;
 }
 
 .client-jobs-table th {
   font-weight: 600;
   color: var(--text-h);
-  background: #f3f4f6;
+  background: transparent;
+}
+
+.client-jobs-table tbody tr {
+  background: transparent;
 }
 
 .clients-error {
   color: #b91c1c;
+}
+
+.client-jobs-section--selected {
+  background: transparent;
+  box-shadow: none;
+}
+
+.clients-page--no-selection {
+  color: #0f0f0f;
+}
+
+.clients-page--no-selection .client-name,
+.clients-page--no-selection .client-meta,
+.clients-page--no-selection p {
+  color: #0f0f0f;
 }

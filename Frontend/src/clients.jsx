@@ -67,19 +67,15 @@ export default function ClientsList() {
 
   const clients = useMemo(() => buildClients(jobs), [jobs]);
 
-  useEffect(() => {
-    if (!activeClientId && clients.length > 0) {
-      setActiveClientId(clients[0].id);
-    }
-    if (activeClientId && !clients.some((client) => client.id === activeClientId)) {
-      setActiveClientId(clients[0]?.id ?? "");
-    }
-  }, [clients, activeClientId]);
-
   const selectedClient = clients.find((client) => client.id === activeClientId);
 
+  const containerClasses = ["clients-page"];
+  if (!selectedClient) {
+    containerClasses.push("clients-page--no-selection");
+  }
+
   return (
-    <div className="clients-page">
+    <div className={containerClasses.join(" ")}>
       <section className="clients-section">
         <h2>Clients</h2>
         {loading ? (
@@ -94,7 +90,9 @@ export default function ClientsList() {
               <div
                 key={client.id}
                 className={`client-card ${
-                  activeClientId === client.id ? "client-card--active" : ""
+                  activeClientId === client.id
+                    ? "client-card--active"
+                    : "client-card--inactive"
                 }`}
                 onClick={() => setActiveClientId(client.id)}
               >
@@ -120,7 +118,11 @@ export default function ClientsList() {
         )}
       </section>
 
-      <section className="client-jobs-section">
+      <section
+        className={`client-jobs-section${
+          selectedClient ? " client-jobs-section--selected" : ""
+        }`}
+      >
         <div className="client-jobs-header">
           <h2>Jobs for {selectedClient ? selectedClient.name : "clients"}</h2>
           {selectedClient && (
