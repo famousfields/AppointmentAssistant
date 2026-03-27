@@ -455,6 +455,15 @@
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.form-success-message {
+  padding: 12px;
+  margin-top: 8px;
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #15803d;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
 .comments-cell {
   display: flex;
   flex-direction: column;

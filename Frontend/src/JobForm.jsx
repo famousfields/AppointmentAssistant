@@ -1,5 +1,6 @@
 // ...existing code...
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function JobForm() {
   const [formData, setFormData] = useState({
@@ -11,6 +12,9 @@ export default function JobForm() {
     comments: ""
   });
   const [errors, setErrors] = useState({});
+  const [successMessage, setSuccessMessage] = useState("");
+  const navigate = useNavigate();
+  const redirectTimer = useRef(null);
 
   const validateField = (name, value) => {
     switch (name) {
@@ -69,6 +73,7 @@ export default function JobForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateAll()) return;
+    setSuccessMessage("");
 
     try {
       const res = await fetch("http://localhost:5000/jobs", {
@@ -80,14 +85,31 @@ export default function JobForm() {
       });
 
       const data = await res.json();
-      console.log(data);
+      if (res.ok) {
+        setSuccessMessage("Job created! Redirecting to Jobs...");
+        redirectTimer.current = setTimeout(() => {
+          navigate("/jobs");
+        }, 1000);
+      } else {
+        setErrors(prev => ({ ...prev, submit: data.error || "Unable to create job" }));
+        setSuccessMessage("");
+      }
     } catch (err) {
       console.error("Network error:", err);
       setErrors(prev => ({ ...prev, submit: "Network error. Check backend." }));
+      setSuccessMessage("");
     }
   };
 
   const hasErrors = Object.values(errors).some(Boolean);
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimer.current) {
+        clearTimeout(redirectTimer.current);
+      }
+    };
+  }, []);
 
   return (
     <form onSubmit={handleSubmit} noValidate className="job-form">
@@ -128,6 +150,9 @@ export default function JobForm() {
       </div>
 
       {errors.submit && <div className="form-error-message">{errors.submit}</div>}
+      {successMessage && (
+        <div className="form-success-message">{successMessage}</div>
+      )}
 
       <button type="submit" disabled={hasErrors} className="form-submit-button">Submit</button>
     </form>
