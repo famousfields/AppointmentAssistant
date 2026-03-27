@@ -20,7 +20,7 @@ export default function LoginPage({ onLogin }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+    setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
   const handleModeChange = (mode) => {
@@ -137,13 +137,17 @@ export default function LoginPage({ onLogin }) {
             Create account
           </button>
         </div>
-        <h2>{isCreateMode ? 'Create your account' : 'Welcome back'}</h2>
-        <p className="login-subtitle">
-          {isCreateMode
-            ? 'Add a few details to set up your account.'
-            : 'Enter your username and password to continue.'}
-        </p>
-        <label htmlFor="username">{isCreateMode ? 'Username' : 'Email'}</label>
+
+        <div>
+          <h2>{isCreateMode ? 'Create your account' : 'Welcome back'}</h2>
+          <p className="login-subtitle">
+            {isCreateMode
+              ? 'Set up your workspace with a few details to start tracking appointments.'
+              : 'Sign in to manage jobs, clients, and follow-up notes in one place.'}
+          </p>
+        </div>
+
+        <label htmlFor="username">{isCreateMode ? 'Username' : 'Email or username'}</label>
         <input
           id="username"
           name="username"
@@ -152,6 +156,7 @@ export default function LoginPage({ onLogin }) {
           onChange={handleChange}
           required
         />
+
         {isCreateMode && (
           <>
             <label htmlFor="email">Email</label>
@@ -165,6 +170,7 @@ export default function LoginPage({ onLogin }) {
             />
           </>
         )}
+
         <label htmlFor="password">Password</label>
         <input
           id="password"
@@ -174,6 +180,7 @@ export default function LoginPage({ onLogin }) {
           onChange={handleChange}
           required
         />
+
         {isCreateMode && (
           <>
             <label htmlFor="confirmPassword">Confirm password</label>
@@ -187,13 +194,19 @@ export default function LoginPage({ onLogin }) {
             />
           </>
         )}
+
         <button className="login-button" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? (isCreateMode ? 'Creating…' : 'Signing in…') : isCreateMode ? 'Create account' : 'Sign in'}
+          {isSubmitting
+            ? isCreateMode
+              ? 'Creating...'
+              : 'Signing in...'
+            : isCreateMode
+              ? 'Create account'
+              : 'Sign in'}
         </button>
-        {status && (
-          <p className={`form-status form-status--${status.type}`}>{status.message}</p>
-        )}
-        <p className="login-note">Not wired yet. Button is purely presentational.</p>
+
+        {status && <p className={`form-status form-status--${status.type}`}>{status.message}</p>}
+        <p className="login-note">Your account actions stay connected to the existing backend endpoints.</p>
       </form>
     </div>
   )

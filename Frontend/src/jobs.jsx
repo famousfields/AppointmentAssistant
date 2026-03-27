@@ -1,194 +1,215 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from 'react'
 
 export default function JobsList({ currentUser }) {
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [commentDraft, setCommentDraft] = useState("");
-  const [modalError, setModalError] = useState("");
-  const [isSavingComments, setIsSavingComments] = useState(false);
+  const [jobs, setJobs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [selectedJob, setSelectedJob] = useState(null)
+  const [commentDraft, setCommentDraft] = useState('')
+  const [modalError, setModalError] = useState('')
+  const [isSavingComments, setIsSavingComments] = useState(false)
 
   useEffect(() => {
     if (!currentUser) {
-      setLoading(false);
-      setJobs([]);
-      setError("Please log in to view your jobs.");
-      return;
+      setLoading(false)
+      setJobs([])
+      setError('Please log in to view your jobs.')
+      return
     }
-    fetchJobs();
-  }, [currentUser]);
+    fetchJobs()
+  }, [currentUser])
 
   const fetchJobs = async () => {
     try {
       const res = await fetch(
         `http://localhost:5000/jobs?userId=${encodeURIComponent(currentUser?.id)}`
-      );
-      if (!res.ok) throw new Error("Failed to fetch jobs");
-      const data = await res.json();
-      setJobs(data);
-      setError(null);
+      )
+      if (!res.ok) throw new Error('Failed to fetch jobs')
+      const data = await res.json()
+      setJobs(data)
+      setError(null)
     } catch (err) {
-      console.error("Error fetching jobs:", err);
-      setError("Failed to load jobs");
+      console.error('Error fetching jobs:', err)
+      setError('Failed to load jobs')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleStatusChange = async (jobId, newStatus) => {
     try {
       const res = await fetch(`http://localhost:5000/jobs/${jobId}`, {
-        method: "PUT",
+        method: 'PUT',
         headers: {
-          "Content-Type": "application/json"
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ status: newStatus })
-      });
+      })
 
-      if (!res.ok) throw new Error("Failed to update status");
-      
-      // Update local state
-      setJobs(jobs.map(job => 
-        job.id === jobId ? { ...job, status: newStatus } : job
-      ));
+      if (!res.ok) throw new Error('Failed to update status')
+
+      setJobs((prev) => prev.map((job) => (job.id === jobId ? { ...job, status: newStatus } : job)))
     } catch (err) {
-      console.error("Error updating status:", err);
-      alert("Failed to update job status");
+      console.error('Error updating status:', err)
+      alert('Failed to update job status')
     }
-  };
+  }
 
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
-  };
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
 
   const getCommentPreview = (text) => {
-    if (!text) return "No notes yet";
-    const cleaned = text.replace(/\s+/g, " ").trim();
-    if (!cleaned) return "No notes yet";
-    return cleaned.length > 70 ? `${cleaned.slice(0, 70)}...` : cleaned;
-  };
+    if (!text) return 'No notes yet'
+    const cleaned = text.replace(/\s+/g, ' ').trim()
+    if (!cleaned) return 'No notes yet'
+    return cleaned.length > 70 ? `${cleaned.slice(0, 70)}...` : cleaned
+  }
 
   const openCommentsModal = (job) => {
-    setSelectedJob(job);
-    setCommentDraft(job.comments || "");
-    setModalError("");
-  };
+    setSelectedJob(job)
+    setCommentDraft(job.comments || '')
+    setModalError('')
+  }
 
   const closeCommentsModal = () => {
-    setSelectedJob(null);
-    setCommentDraft("");
-    setModalError("");
-  };
+    setSelectedJob(null)
+    setCommentDraft('')
+    setModalError('')
+  }
 
   const saveComments = async () => {
-    if (!selectedJob) return;
-    setIsSavingComments(true);
-    setModalError("");
+    if (!selectedJob) return
+    setIsSavingComments(true)
+    setModalError('')
 
     try {
       const res = await fetch(`http://localhost:5000/jobs/${selectedJob.id}/comments`, {
-        method: "PATCH",
+        method: 'PATCH',
         headers: {
-          "Content-Type": "application/json"
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ comments: commentDraft })
-      });
+      })
 
       if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error || "Failed to save notes");
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to save notes')
       }
 
       setJobs((prev) =>
         prev.map((job) =>
           job.id === selectedJob.id ? { ...job, comments: commentDraft } : job
         )
-      );
-      closeCommentsModal();
+      )
+      closeCommentsModal()
     } catch (err) {
-      console.error("Error saving comments:", err);
-      setModalError(err.message || "Unable to save notes");
+      console.error('Error saving comments:', err)
+      setModalError(err.message || 'Unable to save notes')
     } finally {
-      setIsSavingComments(false);
+      setIsSavingComments(false)
     }
-  };
+  }
 
-  if (loading) return <div>Loading jobs...</div>;
-  if (error) return <div style={{ color: "red" }}>{error}</div>;
+  if (loading) {
+    return (
+      <div className="jobs-page">
+        <div className="jobs-state-card">
+          <div>
+            <h3>Loading jobs...</h3>
+            <p>We are gathering your appointment data now.</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="jobs-page">
+        <div className="jobs-state-card">
+          <div>
+            <h3 className="jobs-error">Unable to show jobs</h3>
+            <p>{error}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h2>All Jobs</h2>
+    <div className="jobs-page">
+      <div className="jobs-toolbar">
+        <div>
+          <h3>All jobs</h3>
+          <p>Track schedules, update statuses, and keep every note attached to the right appointment.</p>
+        </div>
+      </div>
+
       {jobs.length === 0 ? (
-        <p>No jobs found</p>
+        <div className="jobs-empty-state">
+          <div>
+            <h3>No jobs found</h3>
+            <p>Create your first appointment to start building out the dashboard.</p>
+          </div>
+        </div>
       ) : (
-        <table style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          marginTop: "20px"
-        }}>
-          <thead>
-            <tr style={{ borderBottom: "2px solid #ddd" }}>
-              <th style={{ textAlign: "left", padding: "10px" }}>Date</th>
-              <th style={{ textAlign: "left", padding: "10px" }}>Job Type</th>
-              <th style={{ textAlign: "left", padding: "10px" }}>Client</th>
-              <th style={{ textAlign: "left", padding: "10px" }}>Phone</th>
-              <th style={{ textAlign: "left", padding: "10px" }}>Address</th>
-              <th style={{ textAlign: "left", padding: "10px" }}>Status</th>
-              <th style={{ textAlign: "left", padding: "10px" }}>Comments</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((job) => (
-              <tr key={job.id} style={{ borderBottom: "1px solid #eee" }}>
-                <td style={{ padding: "10px" }}>{formatDate(job.job_date)}</td>
-                <td style={{ padding: "10px" }}>{job.job_type}</td>
-                <td style={{ padding: "10px" }}>{job.name}</td>
-                <td style={{ padding: "10px" }}>{job.phone}</td>
-                <td style={{ padding: "10px" }}>{job.address}</td>
-                <td style={{ padding: "10px" }}>
-                  <select 
-                    value={job.status} 
-                    onChange={(e) => handleStatusChange(job.id, e.target.value)}
-                    style={{
-                      padding: "5px",
-                      borderRadius: "4px",
-                      border: "1px solid #ddd",
-                      cursor: "pointer",
-                      color: "black",
-                      fontWeight: "600",
-                      backgroundColor: job.status === "Completed" ? "#d1fae5" : job.status === "In Progress" ? "#fef3c7" : job.status === "Cancelled" ? "#fee2e2" : "#f3f4f6"
-                    }}
-                  >
-                    <option value="Pending">Pending</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Cancelled">Cancelled</option>
-              </select>
-                </td>
-                <td style={{ padding: "10px" }}>
-                  <div className="comments-cell">
-                    <button
-                      type="button"
-                      className="comments-button"
-                      onClick={() => openCommentsModal(job)}
-                    >
-                      {job.comments ? "View / edit notes" : "Add notes"}
-                    </button>
-                    <p className="comments-preview">{getCommentPreview(job.comments)}</p>
-                  </div>
-                </td>
+        <div className="jobs-table-wrap">
+          <table className="jobs-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Job Type</th>
+                <th>Client</th>
+                <th>Phone</th>
+                <th>Address</th>
+                <th>Status</th>
+                <th>Comments</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {jobs.map((job) => (
+                <tr key={job.id}>
+                  <td>{formatDate(job.job_date)}</td>
+                  <td>{job.job_type}</td>
+                  <td>{job.name}</td>
+                  <td>{job.phone}</td>
+                  <td>{job.address}</td>
+                  <td>
+                    <select
+                      value={job.status}
+                      onChange={(e) => handleStatusChange(job.id, e.target.value)}
+                      className="jobs-status-select"
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </td>
+                  <td>
+                    <div className="comments-cell">
+                      <button
+                        type="button"
+                        className="comments-button"
+                        onClick={() => openCommentsModal(job)}
+                      >
+                        {job.comments ? 'View / edit notes' : 'Add notes'}
+                      </button>
+                      <p className="comments-preview">{getCommentPreview(job.comments)}</p>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {selectedJob && (
@@ -205,11 +226,7 @@ export default function JobsList({ currentUser }) {
               onChange={(e) => setCommentDraft(e.target.value)}
               placeholder="Add or update notes about this job (500 characters max)"
             ></textarea>
-            {modalError && (
-              <p className="comments-modal-error">
-                {modalError}
-              </p>
-            )}
+            {modalError && <p className="comments-modal-error">{modalError}</p>}
             <div className="comments-modal-actions">
               <button
                 type="button"
@@ -225,12 +242,12 @@ export default function JobsList({ currentUser }) {
                 onClick={saveComments}
                 disabled={isSavingComments}
               >
-                {isSavingComments ? "Saving..." : "Save notes"}
+                {isSavingComments ? 'Saving...' : 'Save notes'}
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
-  );
+  )
 }
