@@ -343,6 +343,30 @@
   text-align: center;
 }
 
+.login-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-status {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: 14px;
+  min-height: 18px;
+}
+
+.form-status--error {
+  color: #b91c1c;
+}
+
+.form-status--success {
+  color: #047857;
+}
+
+.form-status--info {
+  color: #0f172a;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

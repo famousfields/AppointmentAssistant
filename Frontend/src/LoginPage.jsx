@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import './App.css'
 
+const API_BASE = 'http://localhost:5000'
+
 export default function LoginPage() {
   const [formMode, setFormMode] = useState('login')
   const [formData, setFormData] = useState({
@@ -9,17 +11,68 @@ export default function LoginPage() {
     email: '',
     confirmPassword: ''
   })
+  const [status, setStatus] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const isCreateMode = formMode === 'create'
 
   const handleChange = (e) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
+  const handleModeChange = (mode) => {
+    setFormMode(mode)
+    setStatus(null)
   }
 
-  const isCreateMode = formMode === 'create'
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+
+    if (isCreateMode) {
+      if (formData.password !== formData.confirmPassword) {
+        setStatus({ type: 'error', message: 'Passwords must match' })
+        return
+      }
+
+      setIsSubmitting(true)
+      setStatus(null)
+
+      try {
+        const response = await fetch(`${API_BASE}/users`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            username: formData.username,
+            password: formData.password,
+            email: formData.email
+          })
+        })
+        const payload = await response.json().catch(() => ({}))
+
+        if (!response.ok) {
+          const errorMessage =
+            payload.error ||
+            payload.message ||
+            payload.errors?.[0]?.msg ||
+            'Unable to create account'
+          setStatus({ type: 'error', message: errorMessage })
+        } else {
+          setStatus({ type: 'success', message: payload.message || 'Account created' })
+        }
+      } catch (error) {
+        setStatus({ type: 'error', message: error.message || 'Unable to reach the server' })
+      } finally {
+        setIsSubmitting(false)
+      }
+
+      return
+    }
+
+    setStatus({ type: 'info', message: 'Login is not wired yet.' })
+  }
 
   return (
     <div className="login-page">
@@ -30,7 +83,7 @@ export default function LoginPage() {
             role="tab"
             aria-selected={!isCreateMode}
             className={!isCreateMode ? 'active' : ''}
-            onClick={() => setFormMode('login')}
+            onClick={() => handleModeChange('login')}
           >
             Login
           </button>
@@ -39,7 +92,7 @@ export default function LoginPage() {
             role="tab"
             aria-selected={isCreateMode}
             className={isCreateMode ? 'active' : ''}
-            onClick={() => setFormMode('create')}
+            onClick={() => handleModeChange('create')}
           >
             Create account
           </button>
@@ -94,9 +147,12 @@ export default function LoginPage() {
             />
           </>
         )}
-        <button className="login-button" type="submit">
-          {isCreateMode ? 'Create account' : 'Sign in'}
+        <button className="login-button" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? (isCreateMode ? 'Creating…' : 'Signing in…') : isCreateMode ? 'Create account' : 'Sign in'}
         </button>
+        {status && (
+          <p className={`form-status form-status--${status.type}`}>{status.message}</p>
+        )}
         <p className="login-note">Not wired yet. Button is purely presentational.</p>
       </form>
     </div>

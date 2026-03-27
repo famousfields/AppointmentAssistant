@@ -1,6 +1,7 @@
 // ...existing code...
 const express = require("express");
 const cors = require("cors");
+const bcrypt = require("bcrypt");
 const db = require("./db");
 const { body, validationResult } = require("express-validator");
 
@@ -21,6 +22,84 @@ app.get("/test-db", (req, res) => {
     res.json({ message: "DB connected", result });
   });
 });
+
+app.post(
+  "/users",
+  [
+    body("username").trim().isLength({ min: 3 }).withMessage("Name must be at least 3 characters"),
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters")
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { username, email, password } = req.body;
+
+    try {
+      const [existingUsers] = await db.promise().query(
+        "SELECT id FROM users WHERE name = ? OR email = ? LIMIT 1",
+        [username, email]
+      );
+
+      if (existingUsers.length > 0) {
+        return res.status(409).json({ error: "Name or email already in use" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const insertQuery = `
+        INSERT INTO users (name, email, password, created_at)
+        VALUES (?, ?, ?, NOW())
+      `;
+
+      await db.promise().query(insertQuery, [username, email, hashedPassword]);
+      res.status(201).json({ message: "Account created successfully" });
+    } catch (err) {
+      console.error("Error creating user:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+app.post(
+  "/auth/login",
+  [
+    body("usernameOrEmail").trim().notEmpty().withMessage("Username or email is required"),
+    body("password").notEmpty().withMessage("Password is required")
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { usernameOrEmail, password } = req.body;
+
+    try {
+      const [rows] = await db.promise().query(
+        "SELECT id, name, email, password FROM users WHERE name = ? OR email = ? LIMIT 1",
+        [usernameOrEmail, usernameOrEmail]
+      );
+
+      const user = rows[0];
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const passwordMatches = await bcrypt.compare(password, user.password);
+      if (!passwordMatches) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      res.json({
+        message: "Login successful",
+        user: { id: user.id, name: user.name, email: user.email }
+      });
+    } catch (err) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
 
 app.post(
   "/jobs",
