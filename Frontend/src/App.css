@@ -288,6 +288,57 @@
   margin-right: 6px;
 }
 
+.user-menu-container {
+  position: relative;
+}
+
+.user-email-button {
+  font-weight: 600;
+  color: var(--text-h);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  padding: 6px 16px 6px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  margin-right: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.user-email-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.logout-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+  min-width: 150px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.logout-button {
+  width: 100%;
+  padding: 10px 16px;
+  background: transparent;
+  color: var(--text-h);
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+  transition: background-color 0.2s;
+}
+
+.logout-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .primary-link {
   padding: 10px 20px;
   background-color: var(--accent);

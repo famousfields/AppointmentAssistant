@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 import JobForm from "./JobForm";
 import JobsList from "./jobs";
@@ -16,8 +16,16 @@ function App() {
 
 function AppContent() {
   const [currentUser, setCurrentUser] = useState(null)
+  const [showLogoutMenu, setShowLogoutMenu] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
   const isLogin = location.pathname === '/'
+
+  const handleLogout = () => {
+    setCurrentUser(null)
+    setShowLogoutMenu(false)
+    navigate('/')
+  }
 
   return (
     <div>
@@ -39,7 +47,24 @@ function AppContent() {
           </div>
           <div className="primary-nav-meta">
             {currentUser ? (
-              <span className="user-email">{currentUser.email}</span>
+              <div className="user-menu-container">
+                <button
+                  className="user-email-button"
+                  onClick={() => setShowLogoutMenu(!showLogoutMenu)}
+                >
+                  {currentUser.email}
+                </button>
+                {showLogoutMenu && (
+                  <div className="logout-dropdown">
+                    <button
+                      className="logout-button"
+                      onClick={handleLogout}
+                    >
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <Link to="/" className="primary-link">
                 Login
