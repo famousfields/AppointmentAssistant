@@ -143,7 +143,7 @@ export default function LoginPage({ onLogin }) {
             ? 'Add a few details to set up your account.'
             : 'Enter your username and password to continue.'}
         </p>
-        <label htmlFor="username">Email</label>
+        <label htmlFor="username">{isCreateMode ? 'Username' : 'Email'}</label>
         <input
           id="username"
           name="username"

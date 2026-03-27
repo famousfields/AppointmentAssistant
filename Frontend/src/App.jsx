@@ -77,7 +77,7 @@ function AppContent() {
         <Route path="/" element={<LoginPage onLogin={setCurrentUser} />} />
         <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
         <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
-        <Route path="/clients" element={<ClientsList />} />
+        <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
       </Routes>
     </div>
   )

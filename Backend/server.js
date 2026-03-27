@@ -32,7 +32,10 @@ app.post(
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      console.error("Job validation errors:", errors.array());
+      return res.status(400).json({ errors: errors.array() });
+    }
 
     const { username, email, password } = req.body;
 
@@ -112,13 +115,20 @@ app.post(
     }),
     body("address").trim().isLength({ min: 5 }).withMessage("Address must be at least 5 characters"),
     body("jobType").trim().notEmpty().withMessage("Job type is required"),
-    body("jobDate").isISO8601().withMessage("Invalid date").custom((d) => {
-      const date = new Date(d);
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      if (date < today) throw new Error("Date must be today or later");
-      return true;
-    }),
+    body("jobDate")
+      .isISO8601()
+      .withMessage("Invalid date")
+      .custom((d) => {
+        const date = new Date(d);
+        if (Number.isNaN(date.getTime())) throw new Error("Invalid date");
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const earliest = new Date(today);
+        earliest.setDate(earliest.getDate() - 30);
+        if (date > today) throw new Error("Date cannot be in the future");
+        if (date < earliest) throw new Error("Date must be within the last 30 days");
+        return true;
+      }),
     body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars")
   ],
   (req, res) => {
@@ -151,8 +161,8 @@ app.post(
       } else {
         // Client does NOT exist → insert new client
         const insertClientQuery = `
-          INSERT INTO Clients (name, phone, address)
-          VALUES (?, ?, ?)
+          INSERT INTO Clients (name, phone, address, notes)
+          VALUES (?, ?, ?, NULL)
         `;
         db.query(insertClientQuery, [name, phone, address], (err, result) => {
           if (err) {

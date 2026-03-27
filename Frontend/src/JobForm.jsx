@@ -34,9 +34,8 @@ export default function JobForm({ currentUser }) {
         return "";
       case "jobDate": {
         if (!value) return "Date is required";
-        const today = new Date();
-        const todayString = today.toISOString().split('T')[0];
-        if (value < todayString) return "Date must be today or later";
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return "Invalid date";
         return "";
       }
       case "comments":
@@ -88,12 +87,15 @@ export default function JobForm({ currentUser }) {
 
       const data = await res.json();
       if (res.ok) {
+        setErrors(prev => ({ ...prev, submit: "" }));
         setSuccessMessage("Job created! Redirecting to Jobs...");
         redirectTimer.current = setTimeout(() => {
           navigate("/jobs");
         }, 1000);
       } else {
-        setErrors(prev => ({ ...prev, submit: data.error || "Unable to create job" }));
+        const errorMessage =
+          data.errors?.[0]?.msg || data.error || data.message || "Unable to create job";
+        setErrors(prev => ({ ...prev, submit: errorMessage }));
         setSuccessMessage("");
       }
     } catch (err) {

@@ -39,21 +39,27 @@ const buildClients = (jobs) => {
     .sort((a, b) => a.name.localeCompare(b.name));
 };
 
-export default function ClientsList() {
+export default function ClientsList({ currentUser }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeClientId, setActiveClientId] = useState("");
 
   useEffect(() => {
+    if (!currentUser) {
+      setLoading(false);
+      setJobs([]);
+      setError("Please log in to view your clients.");
+      return;
+    }
     fetchJobs();
-  }, []);
+  }, [currentUser]);
 
   const fetchJobs = async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("http://localhost:5000/jobs");
+      const res = await fetch(`http://localhost:5000/jobs?userId=${encodeURIComponent(currentUser?.id)}`);
       if (!res.ok) throw new Error("Unable to load jobs");
       const data = await res.json();
       setJobs(data);
