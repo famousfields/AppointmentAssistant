@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import './App.css'
 
 const API_BASE = 'http://localhost:5000'
 
-export default function LoginPage() {
+export default function LoginPage({ onLogin }) {
+  const navigate = useNavigate()
   const [formMode, setFormMode] = useState('login')
   const [formData, setFormData] = useState({
     username: '',
@@ -71,7 +73,45 @@ export default function LoginPage() {
       return
     }
 
-    setStatus({ type: 'info', message: 'Login is not wired yet.' })
+    setIsSubmitting(true)
+    setStatus(null)
+
+    try {
+      const response = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usernameOrEmail: formData.username,
+          password: formData.password
+        })
+      })
+
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        const errorMessage =
+          payload.error ||
+          payload.message ||
+          payload.errors?.[0]?.msg ||
+          'Invalid credentials'
+        setStatus({ type: 'error', message: errorMessage })
+      } else {
+        const userPayload = payload.user || {
+          email: formData.username,
+          name: formData.username
+        }
+        setStatus({
+          type: 'success',
+          message: payload.message || 'Login successful'
+        })
+        onLogin?.(userPayload)
+        navigate('/jobs')
+      }
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message || 'Unable to reach the server' })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -103,7 +143,7 @@ export default function LoginPage() {
             ? 'Add a few details to set up your account.'
             : 'Enter your username and password to continue.'}
         </p>
-        <label htmlFor="username">Username</label>
+        <label htmlFor="username">Email</label>
         <input
           id="username"
           name="username"

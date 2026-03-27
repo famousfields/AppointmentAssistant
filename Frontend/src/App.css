@@ -262,9 +262,30 @@
 
 .primary-nav {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   margin-bottom: 20px;
+}
+
+.primary-nav-links {
+  display: flex;
+  gap: 10px;
+}
+
+.primary-nav-meta {
+  display: flex;
+  align-items: center;
+}
+
+.user-email {
+  font-weight: 600;
+  color: var(--text-h);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  padding: 6px 16px 6px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  margin-right: 6px;
 }
 
 .primary-link {

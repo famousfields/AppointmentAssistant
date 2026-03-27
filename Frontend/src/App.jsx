@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
 import './App.css'
 import JobForm from "./JobForm";
@@ -14,6 +15,7 @@ function App() {
 }
 
 function AppContent() {
+  const [currentUser, setCurrentUser] = useState(null)
   const location = useLocation()
   const isLogin = location.pathname === '/'
 
@@ -21,27 +23,33 @@ function AppContent() {
     <div>
       <header className="app-header">
         <h1>Appointment Assistant</h1>
-        {!isLogin && (
-          <Link to="/" className="primary-link">
-            Login
-          </Link>
-        )}
       </header>
       {!isLogin && (
         <nav className="primary-nav">
-          <Link to="/jobs/new" className="primary-link">
-            New Job
-          </Link>
-          <Link to="/jobs" className="primary-link">
-            View Jobs
-          </Link>
-          <Link to="/clients" className="primary-link">
-            Clients
-          </Link>
+          <div className="primary-nav-links">
+            <Link to="/jobs/new" className="primary-link">
+              New Job
+            </Link>
+            <Link to="/jobs" className="primary-link">
+              View Jobs
+            </Link>
+            <Link to="/clients" className="primary-link">
+              Clients
+            </Link>
+          </div>
+          <div className="primary-nav-meta">
+            {currentUser ? (
+              <span className="user-email">{currentUser.email}</span>
+            ) : (
+              <Link to="/" className="primary-link">
+                Login
+              </Link>
+            )}
+          </div>
         </nav>
       )}
       <Routes>
-        <Route path="/" element={<LoginPage />} />
+        <Route path="/" element={<LoginPage onLogin={setCurrentUser} />} />
         <Route path="/jobs/new" element={<JobForm />} />
         <Route path="/jobs" element={<JobsList />} />
         <Route path="/clients" element={<ClientsList />} />
