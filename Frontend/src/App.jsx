@@ -19,55 +19,23 @@ function AppContent() {
 
   return (
     <div>
-      <h1>Appointment Assistant</h1>
-      {!isLogin && (
-        <nav style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "20px" }}>
-          <Link to="/" style={{
-            padding: "10px 20px",
-            backgroundColor: "var(--accent)",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            textDecoration: "none",
-            fontWeight: "600",
-            cursor: "pointer"
-          }}>
+      <header className="app-header">
+        <h1>Appointment Assistant</h1>
+        {!isLogin && (
+          <Link to="/" className="primary-link">
             Login
           </Link>
-          <Link to="/jobs/new" style={{
-            padding: "10px 20px",
-            backgroundColor: "var(--accent)",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            textDecoration: "none",
-            fontWeight: "600",
-            cursor: "pointer"
-          }}>
+        )}
+      </header>
+      {!isLogin && (
+        <nav className="primary-nav">
+          <Link to="/jobs/new" className="primary-link">
             New Job
           </Link>
-          <Link to="/jobs" style={{
-            padding: "10px 20px",
-            backgroundColor: "var(--accent)",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            textDecoration: "none",
-            fontWeight: "600",
-            cursor: "pointer"
-          }}>
+          <Link to="/jobs" className="primary-link">
             View Jobs
           </Link>
-          <Link to="/clients" style={{
-            padding: "10px 20px",
-            backgroundColor: "var(--accent)",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            textDecoration: "none",
-            fontWeight: "600",
-            cursor: "pointer"
-          }}>
+          <Link to="/clients" className="primary-link">
             Clients
           </Link>
         </nav>
