@@ -1,4 +1,4 @@
-# Appointment Assistant (Frontend)
+# Appointment Assistant 
 
 This frontend is a React + Vite SPA that pairs with the backend API to track appointments, clients, and payments. The workspace is optimized for teams that need a quick way to log jobs, revisit client history, and glance at a calendar of scheduled work.
 
