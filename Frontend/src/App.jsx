@@ -5,13 +5,15 @@ import JobForm from './JobForm'
 import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
+import CalendarPage from './CalendarPage'
 
 const CURRENT_USER_STORAGE_KEY = 'appointment-assistant:current-user'
 
 const NAV_ITEMS = [
   { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
   { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.' },
-  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' }
+  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' },
+  { label: 'Calendar', path: '/calendar', description: 'View your jobs across the month.' }
 ]
 
 const PAGE_META = {
@@ -26,6 +28,10 @@ const PAGE_META = {
   '/clients': {
     title: 'Client relationships',
     description: 'See every client and drill into their job history in one place.'
+  },
+  '/calendar': {
+    title: 'Calendar overview',
+    description: 'See every scheduled job on a month-by-month calendar.'
   }
 }
 
@@ -167,6 +173,7 @@ function AppContent() {
             <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
             <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
             <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
+            <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
           </Routes>
         </section>
       </main>

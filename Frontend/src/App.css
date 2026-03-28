@@ -414,7 +414,8 @@
   padding: 28px;
 }
 
-.jobs-page {
+.jobs-page,
+.calendar-page {
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -425,6 +426,36 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
+}
+
+.calendar-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.calendar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.calendar-control-button {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-heading);
+  min-height: 48px;
+  padding: 0 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-control-button--today {
+  background: rgba(109, 124, 255, 0.14);
+  border-color: var(--border-strong);
 }
 
 .jobs-payments-summary {
@@ -464,6 +495,122 @@
   border: 1px solid var(--border);
   border-radius: 22px;
   background: rgba(8, 15, 30, 0.65);
+}
+
+.calendar-grid-wrap {
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: rgba(8, 15, 30, 0.65);
+  overflow: hidden;
+}
+
+.calendar-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekday {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-heading);
+  font-size: 0.9rem;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.calendar-day {
+  min-height: 160px;
+  padding: 14px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-row);
+}
+
+.calendar-day:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-day--empty {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.calendar-day--today {
+  background: rgba(109, 124, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(109, 124, 255, 0.32);
+}
+
+.calendar-day-number {
+  color: var(--text-heading);
+  font-weight: 800;
+}
+
+.calendar-day-jobs {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-job-pill {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-heading);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-job-pill:hover {
+  border-color: var(--border-strong);
+  background: rgba(109, 124, 255, 0.14);
+}
+
+.calendar-job-pill-title,
+.calendar-job-pill-type {
+  display: block;
+}
+
+.calendar-job-pill-title {
+  font-weight: 700;
+}
+
+.calendar-job-pill-type,
+.calendar-day-more,
+.calendar-details-label {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.calendar-details-modal {
+  width: min(100%, 640px);
+}
+
+.calendar-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.calendar-details-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.calendar-details-item--full {
+  grid-column: 1 / -1;
 }
 
 .jobs-table,
@@ -746,6 +893,7 @@
   }
 
   .jobs-toolbar,
+  .calendar-toolbar,
   .client-jobs-header,
   .comments-modal-actions {
     flex-direction: column;
@@ -762,5 +910,22 @@
   .client-jobs-table th,
   .client-jobs-table td {
     padding: 14px;
+  }
+
+  .calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-weekday {
+    display: none;
+  }
+
+  .calendar-day {
+    min-height: 0;
+    border-right: 0;
+  }
+
+  .calendar-details-grid {
+    grid-template-columns: 1fr;
   }
 }
