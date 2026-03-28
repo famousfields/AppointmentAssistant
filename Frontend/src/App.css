@@ -145,13 +145,6 @@
   font-size: 0.92rem;
 }
 
-.sidebar-account {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .user-menu-container {
   position: relative;
 }
@@ -191,7 +184,7 @@
 .logout-dropdown {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 10px);
+  top: calc(100% + 10px);
   min-width: 180px;
   padding: 8px;
   border: 1px solid var(--border);
@@ -233,6 +226,26 @@
 .page-header {
   padding: 28px 32px;
   border-radius: var(--radius-xl);
+}
+
+.page-header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.page-header-account {
+  width: min(100%, 460px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.page-header-account .sidebar-section-label {
+  align-self: flex-end;
+  text-align: right;
 }
 
 .page-header-description {
@@ -895,6 +908,7 @@
   .jobs-toolbar,
   .calendar-toolbar,
   .client-jobs-header,
+  .page-header-content,
   .comments-modal-actions {
     flex-direction: column;
     align-items: stretch;

@@ -127,42 +127,53 @@ function AppContent() {
             ))}
           </nav>
 
-          <div className="sidebar-account">
-            <p className="sidebar-section-label">Signed in</p>
-            {currentUser ? (
-              <div className="user-menu-container">
-                <button
-                  className="user-email-button"
-                  onClick={() => setShowLogoutMenu((prev) => !prev)}
-                  type="button"
-                >
-                  <span className="user-email-label">{currentUser.name || currentUser.username || 'Workspace user'}</span>
-                  <span className="user-email-value">{currentUser.email || 'No email available'}</span>
-                </button>
-                {showLogoutMenu && (
-                  <div className="logout-dropdown">
-                    <button className="logout-button" onClick={handleLogout} type="button">
-                      Logout
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button type="button" className="sidebar-secondary-action" onClick={() => navigate('/')}>
-                Return to login
-              </button>
-            )}
-          </div>
         </aside>
       )}
 
       <main className="app-main">
         {!isLogin && (
           <header className="page-header">
-            <div>
-              <p className="page-header-kicker">Workspace overview</p>
-              <h2>{pageMeta.title}</h2>
-              <p className="page-header-description">{pageMeta.description}</p>
+            <div className="page-header-content">
+              <div>
+                <p className="page-header-kicker">Workspace overview</p>
+                <h2>{pageMeta.title}</h2>
+                <p className="page-header-description">{pageMeta.description}</p>
+              </div>
+
+              <div className="page-header-account">
+                <p className="sidebar-section-label">Signed in</p>
+                {currentUser ? (
+                  <div className="user-menu-container">
+                    <button
+                      className="user-email-button"
+                      onClick={() => setShowLogoutMenu((prev) => !prev)}
+                      type="button"
+                    >
+                      <span className="user-email-label">
+                        {currentUser.name || currentUser.username || 'Workspace user'}
+                      </span>
+                      <span className="user-email-value">
+                        {currentUser.email || 'No email available'}
+                      </span>
+                    </button>
+                    {showLogoutMenu && (
+                      <div className="logout-dropdown">
+                        <button className="logout-button" onClick={handleLogout} type="button">
+                          Logout
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="sidebar-secondary-action"
+                    onClick={() => navigate('/')}
+                  >
+                    Return to login
+                  </button>
+                )}
+              </div>
             </div>
           </header>
         )}
