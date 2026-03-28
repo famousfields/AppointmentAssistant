@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BrowserRouter as Router, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 import JobForm from './JobForm'
 import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
+
+const CURRENT_USER_STORAGE_KEY = 'appointment-assistant:current-user'
 
 const NAV_ITEMS = [
   { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
@@ -36,7 +38,20 @@ function App() {
 }
 
 function AppContent() {
-  const [currentUser, setCurrentUser] = useState(null)
+  const [currentUser, setCurrentUser] = useState(() => {
+    if (typeof window === 'undefined') return null
+
+    const savedUser = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY)
+    if (!savedUser) return null
+
+    try {
+      return JSON.parse(savedUser)
+    } catch (error) {
+      console.error('Failed to parse saved user session:', error)
+      window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+      return null
+    }
+  })
   const [showLogoutMenu, setShowLogoutMenu] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -52,6 +67,20 @@ function AppContent() {
 
     return PAGE_META[location.pathname] || PAGE_META['/jobs']
   }, [isLogin, location.pathname])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    if (!currentUser) {
+      window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+      return
+    }
+
+    window.localStorage.setItem(
+      CURRENT_USER_STORAGE_KEY,
+      JSON.stringify(currentUser)
+    )
+  }, [currentUser])
 
   const handleLogout = () => {
     setCurrentUser(null)

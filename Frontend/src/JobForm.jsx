@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+const EMPTY_FORM_DATA = {
+  name: '',
+  phone: '',
+  address: '',
+  jobType: '',
+  jobDate: '',
+  comments: ''
+}
+
+const getDraftStorageKey = (userId) =>
+  `appointment-assistant:job-draft:${userId ?? 'guest'}`
+
 export default function JobForm({ currentUser }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    address: '',
-    jobType: '',
-    jobDate: '',
-    comments: ''
-  })
+  const [formData, setFormData] = useState(EMPTY_FORM_DATA)
   const [errors, setErrors] = useState({})
   const [successMessage, setSuccessMessage] = useState('')
   const navigate = useNavigate()
@@ -85,8 +90,10 @@ export default function JobForm({ currentUser }) {
 
       const data = await res.json()
       if (res.ok) {
+        window.localStorage.removeItem(getDraftStorageKey(currentUser?.id))
         setErrors((prev) => ({ ...prev, submit: '' }))
         setSuccessMessage('Job created! Redirecting to Jobs...')
+        setFormData(EMPTY_FORM_DATA)
         redirectTimer.current = setTimeout(() => {
           navigate('/jobs')
         }, 1000)
@@ -104,6 +111,51 @@ export default function JobForm({ currentUser }) {
   }
 
   const hasErrors = Object.values(errors).some(Boolean)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const savedDraft = window.localStorage.getItem(getDraftStorageKey(currentUser?.id))
+    if (!savedDraft) {
+      setFormData(EMPTY_FORM_DATA)
+      setErrors({})
+      setSuccessMessage('')
+      return
+    }
+
+    try {
+      const parsedDraft = JSON.parse(savedDraft)
+      setFormData({
+        ...EMPTY_FORM_DATA,
+        ...parsedDraft
+      })
+    } catch (err) {
+      console.error('Failed to parse saved job draft:', err)
+      window.localStorage.removeItem(getDraftStorageKey(currentUser?.id))
+      setFormData(EMPTY_FORM_DATA)
+    }
+
+    setErrors({})
+    setSuccessMessage('')
+  }, [currentUser?.id])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const hasDraftContent = Object.values(formData).some((value) =>
+      String(value ?? '').trim().length > 0
+    )
+
+    if (!hasDraftContent) {
+      window.localStorage.removeItem(getDraftStorageKey(currentUser?.id))
+      return
+    }
+
+    window.localStorage.setItem(
+      getDraftStorageKey(currentUser?.id),
+      JSON.stringify(formData)
+    )
+  }, [formData, currentUser?.id])
 
   useEffect(() => {
     return () => {
