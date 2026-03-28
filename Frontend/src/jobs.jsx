@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
@@ -8,6 +8,8 @@ export default function JobsList({ currentUser }) {
   const [commentDraft, setCommentDraft] = useState('')
   const [modalError, setModalError] = useState('')
   const [isSavingComments, setIsSavingComments] = useState(false)
+  const [paymentErrors, setPaymentErrors] = useState({})
+  const [savingPayments, setSavingPayments] = useState({})
 
   useEffect(() => {
     if (!currentUser) {
@@ -55,6 +57,60 @@ export default function JobsList({ currentUser }) {
     }
   }
 
+  const handlePaymentChange = (jobId, nextValue) => {
+    setJobs((prev) =>
+      prev.map((job) => (job.id === jobId ? { ...job, payment: nextValue } : job))
+    )
+    setPaymentErrors((prev) => ({ ...prev, [jobId]: '' }))
+  }
+
+  const handlePaymentSave = async (jobId, value) => {
+    if (savingPayments[jobId]) return
+
+    const normalizedValue = value === '' ? '0' : String(value)
+
+    if (!/^\d+(\.\d{0,2})?$/.test(normalizedValue)) {
+      setPaymentErrors((prev) => ({ ...prev, [jobId]: 'Use a valid amount with up to 2 decimals' }))
+      return
+    }
+
+    try {
+      setSavingPayments((prev) => ({ ...prev, [jobId]: true }))
+      const numericPayment = Number(normalizedValue)
+      const res = await fetch(`http://localhost:5000/jobs/${jobId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ payment: numericPayment })
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to update payment')
+      }
+
+      setJobs((prev) =>
+        prev.map((job) =>
+          job.id === jobId ? { ...job, payment: numericPayment.toFixed(2) } : job
+        )
+      )
+      setPaymentErrors((prev) => ({ ...prev, [jobId]: '' }))
+    } catch (err) {
+      console.error('Error updating payment:', err)
+      setPaymentErrors((prev) => ({ ...prev, [jobId]: err.message || 'Failed to update payment' }))
+    } finally {
+      setSavingPayments((prev) => ({ ...prev, [jobId]: false }))
+    }
+  }
+
+  const handlePaymentKeyDown = async (event, jobId) => {
+    if (event.key !== 'Enter') return
+
+    event.preventDefault()
+    await handlePaymentSave(jobId, event.currentTarget.value)
+  }
+
   const formatDate = (dateString) => {
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', {
@@ -65,12 +121,24 @@ export default function JobsList({ currentUser }) {
     })
   }
 
+  const formatCurrency = (value) =>
+    new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(Number(value) || 0)
+
   const getCommentPreview = (text) => {
     if (!text) return 'No notes yet'
     const cleaned = text.replace(/\s+/g, ' ').trim()
     if (!cleaned) return 'No notes yet'
     return cleaned.length > 70 ? `${cleaned.slice(0, 70)}...` : cleaned
   }
+
+  const totalPayments = useMemo(
+    () =>
+      jobs.reduce((sum, job) => sum + (Number.parseFloat(job.payment) || 0), 0),
+    [jobs]
+  )
 
   const openCommentsModal = (job) => {
     setSelectedJob(job)
@@ -148,7 +216,11 @@ export default function JobsList({ currentUser }) {
       <div className="jobs-toolbar">
         <div>
           <h3>All jobs</h3>
-          <p>Track schedules, update statuses, and keep every note attached to the right appointment.</p>
+          <p>Track schedules, update statuses, payment amounts, and keep every note attached to the right appointment.</p>
+        </div>
+        <div className="jobs-payments-summary">
+          <span className="jobs-payments-summary-label">Total payments</span>
+          <strong>{formatCurrency(totalPayments)}</strong>
         </div>
       </div>
 
@@ -170,6 +242,7 @@ export default function JobsList({ currentUser }) {
                 <th>Phone</th>
                 <th>Address</th>
                 <th>Status</th>
+                <th>Payment</th>
                 <th>Comments</th>
               </tr>
             </thead>
@@ -194,13 +267,34 @@ export default function JobsList({ currentUser }) {
                     </select>
                   </td>
                   <td>
+                    <div className="jobs-payment-cell">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="jobs-payment-input"
+                        value={job.payment ?? ''}
+                        onChange={(e) => handlePaymentChange(job.id, e.target.value)}
+                        onKeyDown={(e) => handlePaymentKeyDown(e, job.id)}
+                        onBlur={(e) => handlePaymentSave(job.id, e.target.value)}
+                        disabled={Boolean(savingPayments[job.id])}
+                      />
+                      {savingPayments[job.id] && (
+                        <p className="jobs-payment-status">Saving...</p>
+                      )}
+                      {paymentErrors[job.id] && (
+                        <p className="jobs-payment-error">{paymentErrors[job.id]}</p>
+                      )}
+                    </div>
+                  </td>
+                  <td>
                     <div className="comments-cell">
                       <button
                         type="button"
                         className="comments-button"
                         onClick={() => openCommentsModal(job)}
                       >
-                        {job.comments ? 'View / edit notes' : 'Add notes'}
+                        {job.comments ? 'edit' : 'Add notes'}
                       </button>
                       <p className="comments-preview">{getCommentPreview(job.comments)}</p>
                     </div>

@@ -7,6 +7,7 @@ const EMPTY_FORM_DATA = {
   address: '',
   jobType: '',
   jobDate: '',
+  payment: '',
   comments: ''
 }
 
@@ -44,6 +45,11 @@ export default function JobForm({ currentUser }) {
       }
       case 'comments':
         if (value && value.length > 500) return 'Comments max 500 chars'
+        return ''
+      case 'payment':
+        if (!value) return ''
+        if (!/^\d+(\.\d{0,2})?$/.test(value)) return 'Payment must be a valid amount'
+        if (Number(value) < 0) return 'Payment cannot be negative'
         return ''
       default:
         return ''
@@ -84,6 +90,7 @@ export default function JobForm({ currentUser }) {
         },
         body: JSON.stringify({
           ...formData,
+          payment: formData.payment === '' ? 0 : Number(formData.payment),
           userId: currentUser?.id ?? null
         })
       })
@@ -217,6 +224,22 @@ export default function JobForm({ currentUser }) {
         <label htmlFor="jobDate">Date</label>
         <input id="jobDate" name="jobDate" type="date" required onChange={handleChange} value={formData.jobDate} />
         {errors.jobDate && <div className="form-error">{errors.jobDate}</div>}
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="payment">Payment</label>
+        <input
+          id="payment"
+          name="payment"
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          onChange={handleChange}
+          value={formData.payment}
+          placeholder="0.00"
+        />
+        {errors.payment && <div className="form-error">{errors.payment}</div>}
       </div>
 
       <div className="form-group">

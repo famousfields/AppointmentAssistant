@@ -12,6 +12,12 @@ const formatDate = (dateString) => {
   })
 }
 
+const formatCurrency = (value) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(Number(value) || 0)
+
 const buildClients = (jobs) => {
   const map = new Map()
 
@@ -34,7 +40,11 @@ const buildClients = (jobs) => {
       const sortedJobs = [...client.jobs].sort(
         (a, b) => new Date(b.job_date) - new Date(a.job_date)
       )
-      return { ...client, jobs: sortedJobs }
+      const totalPayments = sortedJobs.reduce(
+        (sum, job) => sum + (Number.parseFloat(job.payment) || 0),
+        0
+      )
+      return { ...client, jobs: sortedJobs, totalPayments }
     })
     .sort((a, b) => a.name.localeCompare(b.name))
 }
@@ -141,6 +151,9 @@ export default function ClientsList({ currentUser }) {
                   <p className="client-meta">
                     {client.phone} | {client.address}
                   </p>
+                  <p className="client-payment-total">
+                    Total paid: {formatCurrency(client.totalPayments)}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -173,10 +186,15 @@ export default function ClientsList({ currentUser }) {
             </p>
           </div>
           {selectedClient && (
-            <span className="client-jobs-count">
-              {selectedClient.jobs.length} job
-              {selectedClient.jobs.length === 1 ? '' : 's'}
-            </span>
+            <div className="client-jobs-summary">
+              <span className="client-jobs-count">
+                {selectedClient.jobs.length} job
+                {selectedClient.jobs.length === 1 ? '' : 's'}
+              </span>
+              <strong className="client-payment-total client-payment-total--selected">
+                Total paid: {formatCurrency(selectedClient.totalPayments)}
+              </strong>
+            </div>
           )}
         </div>
 
@@ -192,6 +210,7 @@ export default function ClientsList({ currentUser }) {
                   <th>Date</th>
                   <th>Job Type</th>
                   <th>Status</th>
+                  <th>Payment</th>
                   <th>Comments</th>
                 </tr>
               </thead>
@@ -201,6 +220,7 @@ export default function ClientsList({ currentUser }) {
                     <td>{formatDate(job.job_date)}</td>
                     <td>{job.job_type}</td>
                     <td>{job.status}</td>
+                    <td>{formatCurrency(job.payment)}</td>
                     <td>{job.comments || 'No notes yet'}</td>
                   </tr>
                 ))}

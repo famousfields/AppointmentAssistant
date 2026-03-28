@@ -7,6 +7,25 @@ const { body, validationResult } = require("express-validator");
 
 const app = express();
 
+const ensurePaymentsColumn = async () => {
+  const columnCheckQuery = `
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Jobs'
+      AND COLUMN_NAME = 'payment'
+    LIMIT 1
+  `;
+
+  const [rows] = await db.promise().query(columnCheckQuery);
+  if (rows.length > 0) return;
+
+  await db.promise().query(`
+    ALTER TABLE Jobs
+    ADD COLUMN payment DECIMAL(10, 2) NOT NULL DEFAULT 0 AFTER status
+  `);
+};
+
 // middleware
 app.use(cors());
 app.use(express.json());
@@ -129,13 +148,18 @@ app.post(
         if (date < earliest) throw new Error("Date must be within the last 30 days");
         return true;
       }),
-    body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars")
+    body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars"),
+    body("payment")
+      .optional({ values: "falsy" })
+      .isFloat({ min: 0 })
+      .withMessage("Payment must be a number greater than or equal to 0")
   ],
   (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { name, phone, address, jobType, jobDate, comments, userId } = req.body;
+    const { name, phone, address, jobType, jobDate, comments, userId, payment } = req.body;
+    const normalizedPayment = Number.parseFloat(payment ?? 0);
 
     if (!userId) {
       return res.status(401).json({ error: "User ID is required" });
@@ -177,12 +201,12 @@ app.post(
       // Function to insert job for a given client_id
       function insertJob(clientId) {
         const jobQuery = `
-        INSERT INTO Jobs (client_id, job_type, job_date, comments, status, user_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO Jobs (client_id, job_type, job_date, comments, status, payment, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
         db.query(
           jobQuery,
-          [clientId, jobType, jobDate, comments, "Pending", userId],
+          [clientId, jobType, jobDate, comments, "Pending", normalizedPayment, userId],
           (err, result) => {
             if (err) {
             console.error("Error inserting job:", err);
@@ -202,7 +226,7 @@ app.get("/jobs", (req, res) => {
   }
 
   const query = `
-    SELECT j.id, j.job_type, j.job_date, j.comments, j.status,
+    SELECT j.id, j.job_type, j.job_date, j.comments, j.status, j.payment,
            c.id AS client_id, c.name, c.phone, c.address
     FROM Jobs j
     JOIN Clients c ON j.client_id = c.id
@@ -248,19 +272,34 @@ app.patch("/jobs/:id/comments", (req, res) => {
 
 app.put("/jobs/:id", (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, payment } = req.body;
+  const updates = [];
+  const values = [];
 
-  if (!status) {
-    return res.status(400).json({ error: "Status is required" });
+  if (status !== undefined) {
+    const validStatuses = ["Pending", "In Progress", "Completed", "Cancelled"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    updates.push("status = ?");
+    values.push(status);
   }
 
-  const validStatuses = ["Pending", "In Progress", "Completed", "Cancelled"];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
+  if (payment !== undefined) {
+    const parsedPayment = Number.parseFloat(payment);
+    if (Number.isNaN(parsedPayment) || parsedPayment < 0) {
+      return res.status(400).json({ error: "Payment must be a number greater than or equal to 0" });
+    }
+    updates.push("payment = ?");
+    values.push(parsedPayment);
   }
 
-  const query = "UPDATE Jobs SET status = ? WHERE id = ?";
-  db.query(query, [status, id], (err, result) => {
+  if (updates.length === 0) {
+    return res.status(400).json({ error: "At least one field is required" });
+  }
+
+  const query = `UPDATE Jobs SET ${updates.join(", ")} WHERE id = ?`;
+  db.query(query, [...values, id], (err, result) => {
     if (err) {
       console.error("Error updating job:", err);
       return res.status(500).json({ error: "Database error" });
@@ -273,6 +312,14 @@ app.put("/jobs/:id", (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+(async () => {
+  try {
+    await ensurePaymentsColumn();
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to prepare database schema:", error);
+    process.exit(1);
+  }
+})();
