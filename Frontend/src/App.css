@@ -568,6 +568,34 @@
   gap: 14px;
 }
 
+.clients-search {
+  margin-top: 18px;
+}
+
+.clients-search-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+.clients-search-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-input);
+  color: var(--text-heading);
+  padding: 14px 16px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.clients-search-input:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 4px rgba(109, 124, 255, 0.16);
+  background: rgba(15, 23, 42, 1);
+}
+
 .client-card {
   display: flex;
   justify-content: space-between;

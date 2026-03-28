@@ -44,6 +44,7 @@ export default function ClientsList({ currentUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeClientId, setActiveClientId] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
     if (!currentUser) {
@@ -72,8 +73,19 @@ export default function ClientsList({ currentUser }) {
   }
 
   const clients = useMemo(() => buildClients(jobs), [jobs])
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase()
 
-  const selectedClient = clients.find((client) => client.id === activeClientId)
+  const filteredClients = useMemo(() => {
+    if (!normalizedSearchTerm) return clients
+
+    return clients.filter((client) =>
+      [client.name, client.phone, client.address].some((value) =>
+        (value ?? '').toLowerCase().includes(normalizedSearchTerm)
+      )
+    )
+  }, [clients, normalizedSearchTerm])
+
+  const selectedClient = filteredClients.find((client) => client.id === activeClientId)
 
   const containerClasses = ['clients-page']
   if (!selectedClient) {
@@ -88,15 +100,33 @@ export default function ClientsList({ currentUser }) {
           <p>Browse every customer record created from your appointment history.</p>
         </div>
 
+        {!loading && !error && clients.length > 0 && (
+          <div className="clients-search">
+            <label className="clients-search-label" htmlFor="client-search">
+              Search clients
+            </label>
+            <input
+              id="client-search"
+              type="search"
+              className="clients-search-input"
+              placeholder="Search by name, phone, or address"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        )}
+
         {loading ? (
           <p>Loading clients...</p>
         ) : error ? (
           <p className="clients-error">{error}</p>
         ) : clients.length === 0 ? (
           <p>No clients have jobs yet.</p>
+        ) : filteredClients.length === 0 ? (
+          <p>No clients match your search.</p>
         ) : (
           <div className="clients-list">
-            {clients.map((client) => (
+            {filteredClients.map((client) => (
               <div
                 key={client.id}
                 className={`client-card ${
