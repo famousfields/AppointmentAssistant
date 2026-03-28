@@ -11,7 +11,7 @@ const CURRENT_USER_STORAGE_KEY = 'appointment-assistant:current-user'
 
 const NAV_ITEMS = [
   { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
-  { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.' },
+  { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
   { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' },
   { label: 'Calendar', path: '/calendar', description: 'View your jobs across the month.' }
 ]
@@ -116,6 +116,7 @@ function AppContent() {
               <NavLink
                 key={item.path}
                 to={item.path}
+                end={item.matchExact}
                 className={({ isActive }) =>
                   `sidebar-nav-link${isActive ? ' sidebar-nav-link--active' : ''}`
                 }

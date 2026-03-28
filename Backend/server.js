@@ -140,12 +140,6 @@ app.post(
       .custom((d) => {
         const date = new Date(d);
         if (Number.isNaN(date.getTime())) throw new Error("Invalid date");
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const earliest = new Date(today);
-        earliest.setDate(earliest.getDate() - 30);
-        if (date > today) throw new Error("Date cannot be in the future");
-        if (date < earliest) throw new Error("Date must be within the last 30 days");
         return true;
       }),
     body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars"),
