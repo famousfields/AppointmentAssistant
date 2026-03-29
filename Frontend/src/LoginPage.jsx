@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './App.css'
 
-const API_BASE = 'http://localhost:5000'
+import { API_BASE } from './api'
 
 export default function LoginPage({ onLogin }) {
   const navigate = useNavigate()
@@ -104,7 +104,11 @@ export default function LoginPage({ onLogin }) {
           type: 'success',
           message: payload.message || 'Login successful'
         })
-        onLogin?.(userPayload)
+        onLogin?.({
+          user: userPayload,
+          accessToken: payload.accessToken,
+          refreshToken: payload.refreshToken
+        })
         navigate('/jobs')
       }
     } catch (error) {

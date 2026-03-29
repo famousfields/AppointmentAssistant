@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { authFetch } from './api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 const formatDate = (dateString) => {
   if (!dateString) return '-'
@@ -49,28 +50,18 @@ const buildClients = (jobs) => {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export default function ClientsList({ currentUser }) {
+export default function ClientsList({ currentUser, accessToken }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeClientId, setActiveClientId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
 
-  useEffect(() => {
-    if (!currentUser) {
-      setLoading(false)
-      setJobs([])
-      setError('Please log in to view your clients.')
-      return
-    }
-    fetchJobs()
-  }, [currentUser])
-
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`http://localhost:5000/jobs?userId=${encodeURIComponent(currentUser?.id)}`)
+      const res = await authFetch('/jobs', accessToken)
       if (!res.ok) throw new Error('Unable to load jobs')
       const data = await res.json()
       setJobs(data)
@@ -80,7 +71,17 @@ export default function ClientsList({ currentUser }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [accessToken])
+
+  useEffect(() => {
+    if (!currentUser) {
+      setLoading(false)
+      setJobs([])
+      setError('Please log in to view your clients.')
+      return
+    }
+    fetchJobs()
+  }, [currentUser, fetchJobs])
 
   const clients = useMemo(() => buildClients(jobs), [jobs])
   const normalizedSearchTerm = searchTerm.trim().toLowerCase()

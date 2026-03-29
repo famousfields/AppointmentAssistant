@@ -57,3 +57,23 @@ Run both servers side-by-side so the React app can talk to the API.
 1. Add token-based auth + refresh logic so sessions survive server restarts.
 2. Seed fixtures or migrations for the MySQL schema instead of relying on ad-hoc tables.
 3. Expand test coverage (backend integration tests + frontend view tests) before production.
+
+## Public launch checklist (recommended before hosting)
+1. **Secure auth/session model**
+   - Replace client-only session persistence (`localStorage`) with signed access/refresh tokens.
+   - Add protected middleware on every data route and derive `userId` from the auth token (not request body/query).
+2. **Tighten API security**
+   - Restrict CORS to your frontend domain(s) only.
+   - Add API rate limiting, helmet headers, and request logging with redaction.
+3. **Production-ready data management**
+   - Move schema changes from runtime (`ALTER TABLE`) to versioned migrations.
+   - Add daily DB backups + restore drills and clear retention rules.
+4. **Reliability and observability**
+   - Add health/readiness endpoints and centralized structured logs.
+   - Add error monitoring/alerting (e.g., Sentry or equivalent) for both frontend and backend.
+5. **Quality gates**
+   - Add CI checks (lint + unit/integration tests) that run on pull requests.
+   - Add smoke tests for login, create job, edit status/payment, and calendar rendering.
+6. **User-facing polish**
+   - Improve empty states, loading/error states, and mobile responsiveness.
+   - Add a password reset flow and basic account settings before inviting public users.
