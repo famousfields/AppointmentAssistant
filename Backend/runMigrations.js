@@ -44,7 +44,17 @@ async function runMigrations(db) {
     await db.query("START TRANSACTION");
     try {
       for (const statement of statements) {
-        await db.query(statement);
+        try {
+          await db.query(statement);
+        } catch (error) {
+          // MySQL < 8.0 doesn't support `ADD COLUMN IF NOT EXISTS`.
+          // If a migration is replayed against an older DB that already has
+          // the column, treat duplicate-column errors as no-op.
+          if (error.code === "ER_DUP_FIELDNAME") {
+            continue;
+          }
+          throw error;
+        }
       }
       await db.query("INSERT INTO schema_migrations (filename) VALUES (?)", [filename]);
       await db.query("COMMIT");
