@@ -6,8 +6,9 @@ import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
 import CalendarPage from './CalendarPage'
+import { API_BASE } from './api'
 
-const CURRENT_USER_STORAGE_KEY = 'appointment-assistant:current-user'
+const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 
 const NAV_ITEMS = [
   { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
@@ -44,17 +45,17 @@ function App() {
 }
 
 function AppContent() {
-  const [currentUser, setCurrentUser] = useState(() => {
+  const [session, setSession] = useState(() => {
     if (typeof window === 'undefined') return null
 
-    const savedUser = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY)
-    if (!savedUser) return null
+    const savedSession = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!savedSession) return null
 
     try {
-      return JSON.parse(savedUser)
+      return JSON.parse(savedSession)
     } catch (error) {
       console.error('Failed to parse saved user session:', error)
-      window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+      window.localStorage.removeItem(SESSION_STORAGE_KEY)
       return null
     }
   })
@@ -62,6 +63,8 @@ function AppContent() {
   const location = useLocation()
   const navigate = useNavigate()
   const isLogin = location.pathname === '/'
+
+  const currentUser = session?.user ?? null
 
   const pageMeta = useMemo(() => {
     if (isLogin) {
@@ -77,19 +80,30 @@ function AppContent() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    if (!currentUser) {
-      window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+    if (!session) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY)
       return
     }
 
-    window.localStorage.setItem(
-      CURRENT_USER_STORAGE_KEY,
-      JSON.stringify(currentUser)
-    )
-  }, [currentUser])
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
+  }, [session])
 
-  const handleLogout = () => {
-    setCurrentUser(null)
+  const handleLogout = async () => {
+    try {
+      if (session?.refreshToken) {
+        await fetch(`${API_BASE}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ refreshToken: session.refreshToken })
+        })
+      }
+    } catch (error) {
+      console.error('Logout warning:', error)
+    }
+
+    setSession(null)
     setShowLogoutMenu(false)
     navigate('/')
   }
@@ -181,11 +195,11 @@ function AppContent() {
 
         <section className={`page-content${isLogin ? ' page-content--login' : ''}`}>
           <Routes>
-            <Route path="/" element={<LoginPage onLogin={setCurrentUser} />} />
-            <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
-            <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
-            <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
-            <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
+            <Route path="/" element={<LoginPage onLogin={setSession} />} />
+            <Route path="/jobs/new" element={<JobForm currentUser={currentUser} accessToken={session?.accessToken} />} />
+            <Route path="/jobs" element={<JobsList currentUser={currentUser} accessToken={session?.accessToken} />} />
+            <Route path="/clients" element={<ClientsList currentUser={currentUser} accessToken={session?.accessToken} />} />
+            <Route path="/calendar" element={<CalendarPage currentUser={currentUser} accessToken={session?.accessToken} />} />
           </Routes>
         </section>
       </main>

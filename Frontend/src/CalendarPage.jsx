@@ -1,3 +1,4 @@
+import { authFetch } from './api'
 import { useEffect, useMemo, useState } from 'react'
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -56,7 +57,7 @@ const buildCalendarDays = (visibleMonth) => {
   return days
 }
 
-export default function CalendarPage({ currentUser }) {
+export default function CalendarPage({ currentUser, accessToken }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -79,9 +80,7 @@ export default function CalendarPage({ currentUser }) {
       setError('')
 
       try {
-        const res = await fetch(
-          `http://localhost:5000/jobs?userId=${encodeURIComponent(currentUser?.id)}`
-        )
+        const res = await authFetch('/jobs', accessToken)
         if (!res.ok) throw new Error('Failed to fetch jobs')
         const data = await res.json()
         setJobs(data)
@@ -94,7 +93,7 @@ export default function CalendarPage({ currentUser }) {
     }
 
     fetchJobs()
-  }, [currentUser])
+  }, [currentUser, accessToken])
 
   const jobsByDate = useMemo(() => {
     const map = new Map()

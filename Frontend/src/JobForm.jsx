@@ -1,3 +1,4 @@
+import { authFetch } from './api'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -14,7 +15,7 @@ const EMPTY_FORM_DATA = {
 const getDraftStorageKey = (userId) =>
   `appointment-assistant:job-draft:${userId ?? 'guest'}`
 
-export default function JobForm({ currentUser }) {
+export default function JobForm({ currentUser, accessToken }) {
   const [formData, setFormData] = useState(EMPTY_FORM_DATA)
   const [errors, setErrors] = useState({})
   const [successMessage, setSuccessMessage] = useState('')
@@ -83,15 +84,14 @@ export default function JobForm({ currentUser }) {
     setSuccessMessage('')
 
     try {
-      const res = await fetch('http://localhost:5000/jobs', {
+      const res = await authFetch('/jobs', accessToken, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           ...formData,
-          payment: formData.payment === '' ? 0 : Number(formData.payment),
-          userId: currentUser?.id ?? null
+          payment: formData.payment === '' ? 0 : Number(formData.payment)
         })
       })
 
@@ -124,6 +124,7 @@ export default function JobForm({ currentUser }) {
 
     const savedDraft = window.localStorage.getItem(getDraftStorageKey(currentUser?.id))
     if (!savedDraft) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormData(EMPTY_FORM_DATA)
       setErrors({})
       setSuccessMessage('')

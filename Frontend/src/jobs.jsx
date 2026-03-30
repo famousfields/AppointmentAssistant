@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { authFetch } from './api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-export default function JobsList({ currentUser }) {
+export default function JobsList({ currentUser, accessToken }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -11,21 +12,9 @@ export default function JobsList({ currentUser }) {
   const [paymentErrors, setPaymentErrors] = useState({})
   const [savingPayments, setSavingPayments] = useState({})
 
-  useEffect(() => {
-    if (!currentUser) {
-      setLoading(false)
-      setJobs([])
-      setError('Please log in to view your jobs.')
-      return
-    }
-    fetchJobs()
-  }, [currentUser])
-
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     try {
-      const res = await fetch(
-        `http://localhost:5000/jobs?userId=${encodeURIComponent(currentUser?.id)}`
-      )
+      const res = await authFetch('/jobs', accessToken)
       if (!res.ok) throw new Error('Failed to fetch jobs')
       const data = await res.json()
       setJobs(data)
@@ -36,11 +25,21 @@ export default function JobsList({ currentUser }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [accessToken])
+
+  useEffect(() => {
+    if (!currentUser) {
+      setLoading(false)
+      setJobs([])
+      setError('Please log in to view your jobs.')
+      return
+    }
+    fetchJobs()
+  }, [currentUser, fetchJobs])
 
   const handleStatusChange = async (jobId, newStatus) => {
     try {
-      const res = await fetch(`http://localhost:5000/jobs/${jobId}`, {
+      const res = await authFetch(`/jobs/${jobId}`, accessToken, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -77,7 +76,7 @@ export default function JobsList({ currentUser }) {
     try {
       setSavingPayments((prev) => ({ ...prev, [jobId]: true }))
       const numericPayment = Number(normalizedValue)
-      const res = await fetch(`http://localhost:5000/jobs/${jobId}`, {
+      const res = await authFetch(`/jobs/${jobId}`, accessToken, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -158,7 +157,7 @@ export default function JobsList({ currentUser }) {
     setModalError('')
 
     try {
-      const res = await fetch(`http://localhost:5000/jobs/${selectedJob.id}/comments`, {
+      const res = await authFetch(`/jobs/${selectedJob.id}/comments`, accessToken, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json'
