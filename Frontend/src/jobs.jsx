@@ -1,7 +1,7 @@
-import { authFetch } from './api'
+import { useApi } from './apiContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-export default function JobsList({ currentUser, accessToken }) {
+export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -11,10 +11,11 @@ export default function JobsList({ currentUser, accessToken }) {
   const [isSavingComments, setIsSavingComments] = useState(false)
   const [paymentErrors, setPaymentErrors] = useState({})
   const [savingPayments, setSavingPayments] = useState({})
+  const { fetchWithAuth } = useApi()
 
   const fetchJobs = useCallback(async () => {
     try {
-      const res = await authFetch('/jobs', accessToken)
+      const res = await fetchWithAuth('/jobs')
       if (!res.ok) throw new Error('Failed to fetch jobs')
       const data = await res.json()
       setJobs(data)
@@ -25,7 +26,7 @@ export default function JobsList({ currentUser, accessToken }) {
     } finally {
       setLoading(false)
     }
-  }, [accessToken])
+  }, [fetchWithAuth])
 
   useEffect(() => {
     if (!currentUser) {
@@ -39,7 +40,7 @@ export default function JobsList({ currentUser, accessToken }) {
 
   const handleStatusChange = async (jobId, newStatus) => {
     try {
-      const res = await authFetch(`/jobs/${jobId}`, accessToken, {
+      const res = await fetchWithAuth(`/jobs/${jobId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -76,7 +77,7 @@ export default function JobsList({ currentUser, accessToken }) {
     try {
       setSavingPayments((prev) => ({ ...prev, [jobId]: true }))
       const numericPayment = Number(normalizedValue)
-      const res = await authFetch(`/jobs/${jobId}`, accessToken, {
+      const res = await fetchWithAuth(`/jobs/${jobId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -157,7 +158,7 @@ export default function JobsList({ currentUser, accessToken }) {
     setModalError('')
 
     try {
-      const res = await authFetch(`/jobs/${selectedJob.id}/comments`, accessToken, {
+      const res = await fetchWithAuth(`/jobs/${selectedJob.id}/comments`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json'

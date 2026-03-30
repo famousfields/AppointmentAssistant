@@ -8,15 +8,19 @@ Appointment Assistant is a two‑tier toolkit for capturing service jobs, tracki
 - **Shared schemas** – `Schema.json` documents the `users`, `clients`, and `jobs` contracts so the UI and API stay aligned.
 
 ## Backend highlights
-- Uses `mysql2` to talk to the `Jobs` database defined in `Backend/db.js` (host `localhost`, user `root`). Tables include `users`, `Clients`, and `Jobs`.
+- Uses mysql2 to talk to the Jobs database defined in Backend/db.js (host localhost, user 
+oot). Tables include users, Clients, and Jobs.
 - Routes include:
-  - `POST /users` – creates an account with hashed password.
-  - `POST /auth/login` – validates credentials and returns `user`.
-  - `POST /jobs` – validates client info, upserts the client, and inserts a job record.
-  - `GET /jobs` – lists jobs joined with client details, filtered by `userId`.
-  - `PATCH /jobs/:id/comments` – saves comments.
-  - `PUT /jobs/:id` – updates status and/or payment (validates enums/numbers).
-- Adds `payment` column automatically via `ensurePaymentsColumn` helper before listening.
+  - POST /users - creates an account with hashed password.
+  - POST /auth/login - validates credentials and returns user.
+  - POST /auth/refresh - exchanges a refresh token for a new access token.
+  - POST /auth/logout - revokes the provided refresh token.
+  - POST /jobs - validates client info, upserts the client, and inserts a job record.
+  - GET /jobs - lists jobs joined with client details, filtered by userId.
+  - PATCH /jobs/:id/comments - saves comments.
+  - PUT /jobs/:id - updates status and/or payment (validates enums/numbers).
+- Runs Backend/migrations before the server starts so the users, Clients, Jobs, and 
+efresh_tokens tables exist with the expected columns.
 
 ## Frontend highlights
 - `App.jsx` handles routing (`/`, `/jobs`, `/jobs/new`, `/clients`, `/calendar`), sidebar navigation, and persistent `currentUser` using `localStorage`.
@@ -24,6 +28,7 @@ Appointment Assistant is a two‑tier toolkit for capturing service jobs, tracki
 - `jobs.jsx` renders the jobs table with inline status/payment editors, comments modal, and totals.
 - `clients.jsx` groups jobs by client, adds search, and shows job histories.
 - `CalendarPage.jsx` renders a month grid, highlights today, and shows job details on click.
+- `ApiContext` centralizes authenticated requests, retries after hitting `/auth/refresh`, and keeps the UI aligned with the latest access token.
 - Styling lives in `App.css`, which defines the dark shell, cards, tables, and calendar grid.
 
 ## Setup & running
@@ -31,10 +36,12 @@ Appointment Assistant is a two‑tier toolkit for capturing service jobs, tracki
 1. **Backend**
    ```bash
    cd Backend
+   cp .env.example .env
    npm install
+   npm run migrate
    npm run start
    ```
-   The server starts on `http://localhost:5000`. Ensure MySQL is running and credentials in `db.js` match.
+   The server starts on `http://localhost:5000`. Ensure MySQL is running, the `.env` file defines the secrets listed in `.env.example`, and the migration step successfully applies the `users`, `Clients`, `Jobs`, and `refresh_tokens` tables before the app accepts traffic.
 
 2. **Frontend**
    ```bash
@@ -54,14 +61,14 @@ Run both servers side-by-side so the React app can talk to the API.
 5. Navigate the `/calendar` view to see jobs plotted by date and tap a job for details.
 
 ## Next steps
-1. Add token-based auth + refresh logic so sessions survive server restarts.
-2. Seed fixtures or migrations for the MySQL schema instead of relying on ad-hoc tables.
-3. Expand test coverage (backend integration tests + frontend view tests) before production.
+1. Harden the auth stack (rotate secrets, tighten token TTLs, add refresh token rotation, and document the expected claim set).
+2. Expand the migration suite with non-sensitive seed data and index improvements so every environment can be recreated from scratch.
+3. Expand test coverage (backend integration + frontend view tests) and gate releases with lint/test runs.
 
 ## Public launch checklist (recommended before hosting)
 1. **Secure auth/session model**
-   - Replace client-only session persistence (`localStorage`) with signed access/refresh tokens.
-   - Add protected middleware on every data route and derive `userId` from the auth token (not request body/query).
+   - Access/refresh tokens are signed server-side, stored with metadata in `localStorage`, and automatically refreshed via `/auth/refresh` so the UI keeps reusing valid access tokens through `ApiContext`.
+   - The backend already derives `req.user` from the verified token before touching job data; keep auditing middleware to ensure no unauthenticated paths remain.
 2. **Tighten API security**
    - Restrict CORS to your frontend domain(s) only.
    - Add API rate limiting, helmet headers, and request logging with redaction.

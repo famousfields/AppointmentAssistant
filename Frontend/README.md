@@ -8,6 +8,7 @@ This frontend is a React + Vite SPA that pairs with the backend API to track app
 - **Client explorer** with searchable client cards and per-client job histories plus total spend.
 - **Calendar view** that plots jobs on a month grid, highlights today, and shows details in a read-only modal.
 - **Persistent sign-in** using `localStorage`, so the workspace stays logged in across refreshes.
+- **Automatic refresh** via `ApiContext`, which centralizes authenticated fetches, stores expiration metadata alongside the user session, and retries jobs/clients/calendar requests after hitting `/auth/refresh`.
 
 ## Stack overview
 - **React 19 + Vite** – Fast dev loop with HMR, JSX, and modern hooks.

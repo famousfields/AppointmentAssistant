@@ -1,4 +1,4 @@
-import { authFetch } from './api'
+import { useApi } from './apiContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 const formatDate = (dateString) => {
@@ -50,18 +50,19 @@ const buildClients = (jobs) => {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export default function ClientsList({ currentUser, accessToken }) {
+export default function ClientsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeClientId, setActiveClientId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
+  const { fetchWithAuth } = useApi()
 
   const fetchJobs = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const res = await authFetch('/jobs', accessToken)
+      const res = await fetchWithAuth('/jobs')
       if (!res.ok) throw new Error('Unable to load jobs')
       const data = await res.json()
       setJobs(data)
@@ -71,7 +72,7 @@ export default function ClientsList({ currentUser, accessToken }) {
     } finally {
       setLoading(false)
     }
-  }, [accessToken])
+  }, [fetchWithAuth])
 
   useEffect(() => {
     if (!currentUser) {

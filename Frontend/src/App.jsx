@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BrowserRouter as Router, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 import JobForm from './JobForm'
@@ -6,7 +6,8 @@ import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
 import CalendarPage from './CalendarPage'
-import { API_BASE } from './api'
+import { API_BASE, getTokenExpiry } from './api'
+import { ApiContext } from './apiContext'
 
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 
@@ -36,6 +37,38 @@ const PAGE_META = {
   }
 }
 
+const buildSessionRecord = ({ user, accessToken, refreshToken }) => {
+  if (!accessToken) return null
+  return {
+    user,
+    accessToken,
+    refreshToken,
+    expiresAt: getTokenExpiry(accessToken)
+  }
+}
+
+const loadSessionFromStorage = () => {
+  if (typeof window === 'undefined') return null
+  const savedSession = window.localStorage.getItem(SESSION_STORAGE_KEY)
+  if (!savedSession) return null
+
+  try {
+    const parsed = JSON.parse(savedSession)
+    if (!parsed.accessToken) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY)
+      return null
+    }
+    return {
+      ...parsed,
+      expiresAt: parsed.expiresAt ?? getTokenExpiry(parsed.accessToken)
+    }
+  } catch (error) {
+    console.error('Failed to read stored session:', error)
+    window.localStorage.removeItem(SESSION_STORAGE_KEY)
+    return null
+  }
+}
+
 function App() {
   return (
     <Router>
@@ -45,26 +78,58 @@ function App() {
 }
 
 function AppContent() {
-  const [session, setSession] = useState(() => {
-    if (typeof window === 'undefined') return null
-
-    const savedSession = window.localStorage.getItem(SESSION_STORAGE_KEY)
-    if (!savedSession) return null
-
-    try {
-      return JSON.parse(savedSession)
-    } catch (error) {
-      console.error('Failed to parse saved user session:', error)
-      window.localStorage.removeItem(SESSION_STORAGE_KEY)
-      return null
-    }
-  })
+  const [session, setSession] = useState(loadSessionFromStorage)
   const [showLogoutMenu, setShowLogoutMenu] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
   const isLogin = location.pathname === '/'
 
+  const updateSessionFromLogin = useCallback((payload) => {
+    const record = buildSessionRecord(payload)
+    if (record) {
+      setSession(record)
+    }
+  }, [])
+
   const currentUser = session?.user ?? null
+
+  const refreshAccessToken = useCallback(async () => {
+    const refreshToken = session?.refreshToken
+    if (!refreshToken) return null
+
+    try {
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          refreshToken
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Unable to refresh session')
+      }
+
+      const payload = await response.json()
+      const updated = buildSessionRecord({
+        user: payload.user ?? session.user,
+        accessToken: payload.accessToken,
+        refreshToken
+      })
+
+      if (updated) {
+        setSession(updated)
+        return updated
+      }
+    } catch (error) {
+      console.error('Token refresh failed:', error)
+      setSession(null)
+    }
+
+    return null
+  }, [session])
 
   const pageMeta = useMemo(() => {
     if (isLogin) {
@@ -78,6 +143,20 @@ function AppContent() {
   }, [isLogin, location.pathname])
 
   useEffect(() => {
+    if (!session?.expiresAt) return undefined
+    const refreshLeadTimeMs = 30 * 1000
+    const now = Date.now()
+    const delay = session.expiresAt - now - refreshLeadTimeMs
+    if (delay <= 0) {
+      refreshAccessToken()
+      return undefined
+    }
+
+    const timer = setTimeout(() => refreshAccessToken(), delay)
+    return () => clearTimeout(timer)
+  }, [session?.expiresAt, refreshAccessToken])
+
+  useEffect(() => {
     if (typeof window === 'undefined') return
 
     if (!session) {
@@ -87,6 +166,32 @@ function AppContent() {
 
     window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
   }, [session])
+
+  const fetchWithAuth = useCallback(
+    async (path, options = {}) => {
+      const attempt = async (token) => {
+        const headers = {
+          ...(options.headers || {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+        return fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers
+        })
+      }
+
+      let response = await attempt(session?.accessToken)
+      if (response.status === 401 && session?.refreshToken) {
+        const refreshedSession = await refreshAccessToken()
+        if (refreshedSession?.accessToken) {
+          response = await attempt(refreshedSession.accessToken)
+        }
+      }
+
+      return response
+    },
+    [session?.accessToken, session?.refreshToken, refreshAccessToken]
+  )
 
   const handleLogout = async () => {
     try {
@@ -107,6 +212,11 @@ function AppContent() {
     setShowLogoutMenu(false)
     navigate('/')
   }
+
+  const apiContextValue = useMemo(
+    () => ({ fetchWithAuth, session }),
+    [fetchWithAuth, session]
+  )
 
   return (
     <div className={`app-shell${isLogin ? ' app-shell--login' : ''}`}>
@@ -194,13 +304,15 @@ function AppContent() {
         )}
 
         <section className={`page-content${isLogin ? ' page-content--login' : ''}`}>
-          <Routes>
-            <Route path="/" element={<LoginPage onLogin={setSession} />} />
-            <Route path="/jobs/new" element={<JobForm currentUser={currentUser} accessToken={session?.accessToken} />} />
-            <Route path="/jobs" element={<JobsList currentUser={currentUser} accessToken={session?.accessToken} />} />
-            <Route path="/clients" element={<ClientsList currentUser={currentUser} accessToken={session?.accessToken} />} />
-            <Route path="/calendar" element={<CalendarPage currentUser={currentUser} accessToken={session?.accessToken} />} />
-          </Routes>
+          <ApiContext.Provider value={apiContextValue}>
+            <Routes>
+              <Route path="/" element={<LoginPage onLogin={updateSessionFromLogin} />} />
+              <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
+              <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
+              <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
+              <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
+            </Routes>
+          </ApiContext.Provider>
         </section>
       </main>
     </div>

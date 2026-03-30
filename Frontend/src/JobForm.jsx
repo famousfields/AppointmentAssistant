@@ -1,4 +1,4 @@
-import { authFetch } from './api'
+import { useApi } from './apiContext'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -15,12 +15,13 @@ const EMPTY_FORM_DATA = {
 const getDraftStorageKey = (userId) =>
   `appointment-assistant:job-draft:${userId ?? 'guest'}`
 
-export default function JobForm({ currentUser, accessToken }) {
+export default function JobForm({ currentUser }) {
   const [formData, setFormData] = useState(EMPTY_FORM_DATA)
   const [errors, setErrors] = useState({})
   const [successMessage, setSuccessMessage] = useState('')
   const navigate = useNavigate()
   const redirectTimer = useRef(null)
+  const { fetchWithAuth } = useApi()
 
   const validateField = (name, value) => {
     switch (name) {
@@ -84,7 +85,7 @@ export default function JobForm({ currentUser, accessToken }) {
     setSuccessMessage('')
 
     try {
-      const res = await authFetch('/jobs', accessToken, {
+      const res = await fetchWithAuth('/jobs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
