@@ -43,6 +43,7 @@ export default function LoginPage({ onLogin }) {
       try {
         const response = await fetch(`${API_BASE}/users`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json'
           },
@@ -79,6 +80,7 @@ export default function LoginPage({ onLogin }) {
     try {
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           usernameOrEmail: formData.username,
@@ -106,8 +108,7 @@ export default function LoginPage({ onLogin }) {
         })
         onLogin?.({
           user: userPayload,
-          accessToken: payload.accessToken,
-          refreshToken: payload.refreshToken
+          accessToken: payload.accessToken
         })
         navigate('/jobs')
       }

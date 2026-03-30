@@ -1,9 +1,3 @@
-CREATE TABLE IF NOT EXISTS refresh_tokens (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id INT NOT NULL,
-  token TEXT NOT NULL,
-  expires_at DATETIME NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_refresh_tokens_user_id (user_id),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+-- No-op migration kept for sequence stability.
+-- The `refresh_tokens` table now lives in `001_add_payment_column.sql`.
+SELECT 1;

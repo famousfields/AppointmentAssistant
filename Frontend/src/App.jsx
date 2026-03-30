@@ -37,25 +37,24 @@ const PAGE_META = {
   }
 }
 
-const buildSessionRecord = ({ user, accessToken, refreshToken }) => {
+const buildSessionRecord = ({ user, accessToken }) => {
   if (!accessToken) return null
   return {
     user,
     accessToken,
-    refreshToken,
     expiresAt: getTokenExpiry(accessToken)
   }
 }
 
 const loadSessionFromStorage = () => {
   if (typeof window === 'undefined') return null
-  const savedSession = window.localStorage.getItem(SESSION_STORAGE_KEY)
+  const savedSession = window.sessionStorage.getItem(SESSION_STORAGE_KEY)
   if (!savedSession) return null
 
   try {
     const parsed = JSON.parse(savedSession)
     if (!parsed.accessToken) {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY)
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
       return null
     }
     return {
@@ -64,7 +63,7 @@ const loadSessionFromStorage = () => {
     }
   } catch (error) {
     console.error('Failed to read stored session:', error)
-    window.localStorage.removeItem(SESSION_STORAGE_KEY)
+    window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
     return null
   }
 }
@@ -94,18 +93,13 @@ function AppContent() {
   const currentUser = session?.user ?? null
 
   const refreshAccessToken = useCallback(async () => {
-    const refreshToken = session?.refreshToken
-    if (!refreshToken) return null
-
     try {
       const response = await fetch(`${API_BASE}/auth/refresh`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          refreshToken
-        })
+        }
       })
 
       if (!response.ok) {
@@ -115,8 +109,7 @@ function AppContent() {
       const payload = await response.json()
       const updated = buildSessionRecord({
         user: payload.user ?? session.user,
-        accessToken: payload.accessToken,
-        refreshToken
+        accessToken: payload.accessToken
       })
 
       if (updated) {
@@ -160,11 +153,11 @@ function AppContent() {
     if (typeof window === 'undefined') return
 
     if (!session) {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY)
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
       return
     }
 
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
   }, [session])
 
   const fetchWithAuth = useCallback(
@@ -176,12 +169,13 @@ function AppContent() {
         }
         return fetch(`${API_BASE}${path}`, {
           ...options,
+          credentials: 'include',
           headers
         })
       }
 
       let response = await attempt(session?.accessToken)
-      if (response.status === 401 && session?.refreshToken) {
+      if (response.status === 401) {
         const refreshedSession = await refreshAccessToken()
         if (refreshedSession?.accessToken) {
           response = await attempt(refreshedSession.accessToken)
@@ -190,20 +184,18 @@ function AppContent() {
 
       return response
     },
-    [session?.accessToken, session?.refreshToken, refreshAccessToken]
+    [session?.accessToken, refreshAccessToken]
   )
 
   const handleLogout = async () => {
     try {
-      if (session?.refreshToken) {
-        await fetch(`${API_BASE}/auth/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ refreshToken: session.refreshToken })
-        })
-      }
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
     } catch (error) {
       console.error('Logout warning:', error)
     }

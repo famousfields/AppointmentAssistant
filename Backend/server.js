@@ -1,17 +1,25 @@
-const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 const db = require("./db");
 const runMigrations = require("./runMigrations");
+const {
+  clearRefreshTokenCookie,
+  createAccessToken,
+  createRefreshToken,
+  parseCookies,
+  serializeRefreshTokenCookie,
+  verifySignedToken
+} = require("./auth");
 const { body, validationResult } = require("express-validator");
 
 const app = express();
 
 const ACCESS_TOKEN_TTL_MS = Number.parseInt(process.env.ACCESS_TOKEN_TTL_MS || `${15 * 60 * 1000}`, 10);
 const REFRESH_TOKEN_TTL_DAYS = Number.parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || "14", 10);
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "dev-access-secret";
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "dev-refresh-secret";
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "";
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
@@ -26,27 +34,20 @@ const allowedOrigins = (
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-const base64UrlEncode = (value) => Buffer.from(value).toString("base64url");
-const base64UrlDecodeJson = (value) => JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+const getRefreshCookieOptions = () => ({
+  secure: IS_PRODUCTION,
+  sameSite: "Lax",
+  maxAgeSeconds: REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60
+});
 
-const signToken = (payload, secret) => {
-  const data = base64UrlEncode(JSON.stringify(payload));
-  const sig = crypto.createHmac("sha256", secret).update(data).digest("base64url");
-  return `${data}.${sig}`;
-};
+const validateRuntimeConfig = () => {
+  const missing = [];
+  if (!ACCESS_TOKEN_SECRET) missing.push("ACCESS_TOKEN_SECRET");
+  if (!REFRESH_TOKEN_SECRET) missing.push("REFRESH_TOKEN_SECRET");
 
-const verifyToken = (token, secret) => {
-  const [data, signature] = (token || "").split(".");
-  if (!data || !signature) throw new Error("Invalid token format");
-
-  const expected = crypto.createHmac("sha256", secret).update(data).digest("base64url");
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-    throw new Error("Invalid token signature");
+  if (missing.length > 0) {
+    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
   }
-
-  const payload = base64UrlDecodeJson(data);
-  if (payload.exp && Date.now() > payload.exp) throw new Error("Expired token");
-  return payload;
 };
 
 const createRateLimiter = ({ windowMs, max }) => {
@@ -69,36 +70,6 @@ const createRateLimiter = ({ windowMs, max }) => {
   };
 };
 
-const createAccessToken = (user) =>
-  signToken(
-    {
-      sub: user.id,
-      name: user.name,
-      email: user.email,
-      exp: Date.now() + ACCESS_TOKEN_TTL_MS
-    },
-    ACCESS_TOKEN_SECRET
-  );
-
-const createRefreshToken = (user) =>
-  signToken(
-    {
-      sub: user.id,
-      exp: Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000
-    },
-    REFRESH_TOKEN_SECRET
-  );
-
-const upsertRefreshToken = async (userId, token) => {
-  await db.promise().query(
-    `
-      INSERT INTO refresh_tokens (user_id, token, expires_at)
-      VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))
-    `,
-    [userId, token, REFRESH_TOKEN_TTL_DAYS]
-  );
-};
-
 const requireAuth = (req, res, next) => {
   const authorization = req.headers.authorization || "";
   const [scheme, token] = authorization.split(" ");
@@ -108,7 +79,7 @@ const requireAuth = (req, res, next) => {
   }
 
   try {
-    const payload = verifyToken(token, ACCESS_TOKEN_SECRET);
+    const payload = verifySignedToken(token, ACCESS_TOKEN_SECRET);
     req.user = {
       id: payload.sub,
       name: payload.name,
@@ -117,6 +88,31 @@ const requireAuth = (req, res, next) => {
     return next();
   } catch (error) {
     return res.status(401).json({ error: "Invalid or expired token" });
+  }
+};
+
+const storeRefreshToken = async (userId, token) => {
+  await db.promise().query(
+    `
+      INSERT INTO refresh_tokens (user_id, token, expires_at)
+      VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))
+    `,
+    [userId, token, REFRESH_TOKEN_TTL_DAYS]
+  );
+};
+
+const rotateRefreshToken = async (user, currentToken) => {
+  const nextRefreshToken = createRefreshToken(user, REFRESH_TOKEN_SECRET, REFRESH_TOKEN_TTL_DAYS);
+
+  await db.promise().query("START TRANSACTION");
+  try {
+    await db.promise().query("DELETE FROM refresh_tokens WHERE token = ?", [currentToken]);
+    await storeRefreshToken(user.id, nextRefreshToken);
+    await db.promise().query("COMMIT");
+    return nextRefreshToken;
+  } catch (error) {
+    await db.promise().query("ROLLBACK");
+    throw error;
   }
 };
 
@@ -132,7 +128,8 @@ app.use(
     origin(origin, callback) {
       if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error("Origin not allowed by CORS"));
-    }
+    },
+    credentials: true
   })
 );
 app.use(express.json());
@@ -234,15 +231,15 @@ app.post(
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      const accessToken = createAccessToken(user);
-      const refreshToken = createRefreshToken(user);
-      await upsertRefreshToken(user.id, refreshToken);
+      const accessToken = createAccessToken(user, ACCESS_TOKEN_SECRET, ACCESS_TOKEN_TTL_MS);
+      const refreshToken = createRefreshToken(user, REFRESH_TOKEN_SECRET, REFRESH_TOKEN_TTL_DAYS);
+      await storeRefreshToken(user.id, refreshToken);
 
+      res.setHeader("Set-Cookie", serializeRefreshTokenCookie(refreshToken, getRefreshCookieOptions()));
       return res.json({
         message: "Login successful",
         user: { id: user.id, name: user.name, email: user.email },
-        accessToken,
-        refreshToken
+        accessToken
       });
     } catch (err) {
       console.error("Login error:", err);
@@ -251,63 +248,65 @@ app.post(
   }
 );
 
-app.post(
-  "/auth/refresh",
-  authLimiter,
-  [body("refreshToken").trim().notEmpty().withMessage("Refresh token is required")],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+app.post("/auth/refresh", authLimiter, async (req, res) => {
+  const refreshToken =
+    req.body?.refreshToken ||
+    parseCookies(req.headers.cookie || "").refreshToken;
 
-    const { refreshToken } = req.body;
-
-    try {
-      const payload = verifyToken(refreshToken, REFRESH_TOKEN_SECRET);
-      const userId = payload.sub;
-
-      const [tokens] = await db.promise().query(
-        `SELECT id FROM refresh_tokens WHERE token = ? AND user_id = ? AND expires_at > NOW() LIMIT 1`,
-        [refreshToken, userId]
-      );
-
-      if (tokens.length === 0) {
-        return res.status(401).json({ error: "Invalid refresh token" });
-      }
-
-      const [users] = await db.promise().query(
-        "SELECT id, name, email FROM users WHERE id = ? LIMIT 1",
-        [userId]
-      );
-
-      const user = users[0];
-      if (!user) {
-        return res.status(401).json({ error: "User not found" });
-      }
-
-      const accessToken = createAccessToken(user);
-      return res.json({ accessToken, user });
-    } catch (error) {
-      return res.status(401).json({ error: "Invalid or expired refresh token" });
-    }
+  if (!refreshToken) {
+    return res.status(400).json({ error: "Refresh token is required" });
   }
-);
 
-app.post(
-  "/auth/logout",
-  [body("refreshToken").optional().isString()],
-  async (req, res) => {
-    const { refreshToken } = req.body;
+  try {
+    const payload = verifySignedToken(refreshToken, REFRESH_TOKEN_SECRET);
+    const userId = payload.sub;
 
-    try {
-      if (refreshToken) {
-        await db.promise().query("DELETE FROM refresh_tokens WHERE token = ?", [refreshToken]);
-      }
-      return res.json({ message: "Logged out" });
-    } catch (error) {
-      return res.status(500).json({ error: "Internal server error" });
+    const [tokens] = await db.promise().query(
+      `SELECT id FROM refresh_tokens WHERE token = ? AND user_id = ? AND expires_at > NOW() LIMIT 1`,
+      [refreshToken, userId]
+    );
+
+    if (tokens.length === 0) {
+      res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
+      return res.status(401).json({ error: "Invalid refresh token" });
     }
+
+    const [users] = await db.promise().query(
+      "SELECT id, name, email FROM users WHERE id = ? LIMIT 1",
+      [userId]
+    );
+
+    const user = users[0];
+    if (!user) {
+      res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    const accessToken = createAccessToken(user, ACCESS_TOKEN_SECRET, ACCESS_TOKEN_TTL_MS);
+    const nextRefreshToken = await rotateRefreshToken(user, refreshToken);
+    res.setHeader("Set-Cookie", serializeRefreshTokenCookie(nextRefreshToken, getRefreshCookieOptions()));
+    return res.json({ accessToken, user });
+  } catch (error) {
+    res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
-);
+});
+
+app.post("/auth/logout", async (req, res) => {
+  const refreshToken =
+    req.body?.refreshToken ||
+    parseCookies(req.headers.cookie || "").refreshToken;
+
+  try {
+    if (refreshToken) {
+      await db.promise().query("DELETE FROM refresh_tokens WHERE token = ?", [refreshToken]);
+    }
+    res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
+    return res.json({ message: "Logged out" });
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 app.post(
   "/jobs",
@@ -344,7 +343,7 @@ app.post(
     const userId = req.user.id;
 
     const getClientQuery = `
-      SELECT id FROM Clients 
+      SELECT id FROM Clients
       WHERE name = ? AND phone = ? AND address = ?
       LIMIT 1
     `;
@@ -485,6 +484,7 @@ app.put("/jobs/:id", requireAuth, (req, res) => {
 const PORT = process.env.PORT || 5000;
 (async () => {
   try {
+    validateRuntimeConfig();
     await runMigrations(db.promise());
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
