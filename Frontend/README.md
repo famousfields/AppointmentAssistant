@@ -1,26 +1,27 @@
 # Appointment Assistant (Frontend)
 
-This frontend is a React + Vite SPA that pairs with the backend API to track appointments, clients, and payments. The workspace is optimized for teams that need a quick way to log jobs, revisit client history, and glance at a calendar of scheduled work.
+This frontend is a React + Vite SPA that pairs with the backend API to track appointments, clients, comments, and payments. It is designed for quick job capture and fast day-to-day scheduling work.
 
-## Key Features
-- **Job capture form** with live validation, draft caching, payment support, and status tracking.
-- **Jobs dashboard** that lists every appointment, allows inline status/payment edits, and keeps a running total of payments.
-- **Client explorer** with searchable client cards and per-client job histories plus total spend.
-- **Calendar view** that plots jobs on a month grid, highlights today, and shows details in a read-only modal.
-- **Persistent sign-in** using `localStorage`, so the workspace stays logged in across refreshes.
-- **Automatic refresh** via `ApiContext`, which centralizes authenticated fetches, stores expiration metadata alongside the user session, and retries jobs/clients/calendar requests after hitting `/auth/refresh`.
+## Key features
+- Job capture form with live validation, draft caching, payment support, and comments.
+- Jobs dashboard with inline status/payment edits and note management.
+- Client explorer with searchable customer cards and per-client job history.
+- Calendar view with month navigation and read-only job detail modals.
+- Access-token refresh through `ApiContext`, with refresh handled by a backend-managed `HttpOnly` cookie.
 
 ## Stack overview
-- **React 19 + Vite** – Fast dev loop with HMR, JSX, and modern hooks.
-- **React Router v7** – Drives navigation between `/jobs`, `/jobs/new`, `/clients`, and `/calendar` inside the `app-shell`.
-- **Vanilla CSS with design tokens** – Shared gradients, border-radius, and spacers live in `App.css`.
-- **Browser storage helpers** – Job drafts and the current user are stored via `localStorage` helpers inside `JobForm.jsx` and `App.jsx` respectively.
+- React 19 + Vite
+- React Router v7
+- Vanilla CSS in `App.css`
+- `sessionStorage` for the short-lived access token and UI session metadata
 
 ## Directory highlights
-- `src/App.jsx` – App shell, sidebar navigation, workspace overview header, and route definitions.
-- `src/JobForm.jsx` – Job creation form with validation, `localStorage` draft syncing, and payment handling.
-- `src/jobs.jsx`, `src/clients.jsx`, `src/CalendarPage.jsx` – Main workspace views with data fetching from `http://localhost:5000/jobs`.
-- `src/App.css` – Shared styles for the shell, cards, tables, calendar grid, and buttons.
+- `src/App.jsx` - app shell, routing, session restore, and refresh orchestration.
+- `src/LoginPage.jsx` - login/create-account flow.
+- `src/JobForm.jsx` - job creation form with local draft persistence.
+- `src/jobs.jsx`, `src/clients.jsx`, `src/CalendarPage.jsx` - main authenticated views.
+- `src/api.js` - API base URL plus access-token payload/expiry helpers.
+- `src/apiContext.js` - shared authenticated fetch wrapper for the app.
 
 ## Getting started
 
@@ -30,16 +31,21 @@ npm install
 npm run dev
 ```
 
-The Vite dev server runs on `http://localhost:5173` by default. The frontend expects the backend API on `http://localhost:5000`, so start the server in parallel and log in before navigating to protected pages.
+The Vite dev server usually runs on `http://localhost:5173`, but it may fall back to `5174` if that port is busy. Make sure the backend CORS configuration allows whichever frontend origin you are using.
 
-## Testing the main flows
-1. Create or log in to a user via the `/` login page.
-2. Capture a new job under `/jobs/new`, including payment and comments; refresh to confirm the draft persists.
-3. Review the jobs table; update status, edit payments (Enter or blur saves), and open the comments modal.
-4. Browse `/clients` to search clients and compare payment totals per customer.
-5. Visit `/calendar`, page through months, and tap a job to open the detail modal.
+## Available scripts
 
-## Next steps
-1. Wire real auth tokens so the app can talk to a hosted API securely.
-2. Add unit/integration tests for core views and form validation.
-3. Build mobile navigation tweaks and responsive calendar cell spacing if the workspace is used on phones.
+```bash
+npm run dev
+npm run build
+npm run lint
+npm test
+```
+
+## Main flows to verify
+1. Create an account or sign in on `/`.
+2. Refresh the page and confirm the session restores correctly.
+3. Create a new job on `/jobs/new`.
+4. Update status, payment, and comments on `/jobs`.
+5. Review grouped history on `/clients`.
+6. Open jobs from `/calendar`.
