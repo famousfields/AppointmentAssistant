@@ -749,6 +749,16 @@
   box-shadow: var(--shadow-lg);
 }
 
+.job-editor-modal {
+  width: min(100%, 680px);
+}
+
+.job-editor-form {
+  margin-top: 18px;
+  display: grid;
+  gap: 14px;
+}
+
 .comments-modal-header {
   display: flex;
   flex-direction: column;

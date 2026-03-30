@@ -21,6 +21,7 @@ export default function JobForm({ currentUser }) {
   const [successMessage, setSuccessMessage] = useState('')
   const navigate = useNavigate()
   const redirectTimer = useRef(null)
+  const isInitialMount = useRef(true)
   const { fetchWithAuth } = useApi()
 
   const validateField = (name, value) => {
@@ -129,6 +130,7 @@ export default function JobForm({ currentUser }) {
       setFormData(EMPTY_FORM_DATA)
       setErrors({})
       setSuccessMessage('')
+      isInitialMount.current = false
       return
     }
 
@@ -146,10 +148,14 @@ export default function JobForm({ currentUser }) {
 
     setErrors({})
     setSuccessMessage('')
+    isInitialMount.current = false
   }, [currentUser?.id])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    
+    // Skip saving on initial mount to avoid wiping the loaded draft
+    if (isInitialMount.current) return
 
     const hasDraftContent = Object.values(formData).some((value) =>
       String(value ?? '').trim().length > 0

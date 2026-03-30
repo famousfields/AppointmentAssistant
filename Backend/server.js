@@ -440,46 +440,133 @@ app.patch("/jobs/:id/comments", requireAuth, (req, res) => {
   });
 });
 
-app.put("/jobs/:id", requireAuth, (req, res) => {
-  const { id } = req.params;
-  const { status, payment } = req.body;
-  const updates = [];
-  const values = [];
+app.put(
+  "/jobs/:id",
+  requireAuth,
+  [
+    body("name").optional().trim().isLength({ min: 2 }).withMessage("Name must be at least 2 characters"),
+    body("phone")
+      .optional()
+      .custom((v) => {
+        const digits = (v || "").replace(/\D/g, "");
+        if (digits.length < 7 || digits.length > 15) throw new Error("Invalid phone number");
+        return true;
+      }),
+    body("address").optional().trim().isLength({ min: 5 }).withMessage("Address must be at least 5 characters"),
+    body("jobType").optional().trim().notEmpty().withMessage("Job type is required"),
+    body("jobDate")
+      .optional()
+      .isISO8601()
+      .withMessage("Invalid date")
+      .custom((d) => {
+        const date = new Date(d);
+        if (Number.isNaN(date.getTime())) throw new Error("Invalid date");
+        return true;
+      }),
+    body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars"),
+    body("status")
+      .optional()
+      .isIn(["Pending", "In Progress", "Completed", "Cancelled"])
+      .withMessage("Invalid status"),
+    body("payment")
+      .optional()
+      .isFloat({ min: 0 })
+      .withMessage("Payment must be a number greater than or equal to 0")
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  if (status !== undefined) {
-    const validStatuses = ["Pending", "In Progress", "Completed", "Cancelled"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: "Invalid status" });
+    const jobId = Number(req.params.id);
+    if (Number.isNaN(jobId)) {
+      return res.status(400).json({ error: "Invalid job ID" });
     }
-    updates.push("status = ?");
-    values.push(status);
-  }
 
-  if (payment !== undefined) {
-    const parsedPayment = Number.parseFloat(payment);
-    if (Number.isNaN(parsedPayment) || parsedPayment < 0) {
-      return res.status(400).json({ error: "Payment must be a number greater than or equal to 0" });
+    const { name, phone, address, jobType, jobDate, comments, status, payment } = req.body;
+    const jobUpdates = [];
+    const jobValues = [];
+    const clientUpdates = [];
+    const clientValues = [];
+
+    if (name !== undefined) {
+      clientUpdates.push("name = ?");
+      clientValues.push(name.trim());
     }
-    updates.push("payment = ?");
-    values.push(parsedPayment);
-  }
 
-  if (updates.length === 0) {
-    return res.status(400).json({ error: "At least one field is required" });
-  }
+    if (phone !== undefined) {
+      clientUpdates.push("phone = ?");
+      clientValues.push(phone);
+    }
 
-  const query = `UPDATE Jobs SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`;
-  db.query(query, [...values, id, req.user.id], (err, result) => {
-    if (err) {
+    if (address !== undefined) {
+      clientUpdates.push("address = ?");
+      clientValues.push(address.trim());
+    }
+
+    if (jobType !== undefined) {
+      jobUpdates.push("job_type = ?");
+      jobValues.push(jobType.trim());
+    }
+
+    if (jobDate !== undefined) {
+      jobUpdates.push("job_date = ?");
+      jobValues.push(jobDate);
+    }
+
+    if (comments !== undefined) {
+      jobUpdates.push("comments = ?");
+      jobValues.push(comments.trim() === "" ? null : comments.trim());
+    }
+
+    if (status !== undefined) {
+      jobUpdates.push("status = ?");
+      jobValues.push(status);
+    }
+
+    if (payment !== undefined) {
+      jobUpdates.push("payment = ?");
+      jobValues.push(Number.parseFloat(payment));
+    }
+
+    if (jobUpdates.length === 0 && clientUpdates.length === 0) {
+      return res.status(400).json({ error: "At least one field is required" });
+    }
+
+    try {
+      const [[jobRow]] = await db.promise().query(
+        "SELECT id, client_id FROM Jobs WHERE id = ? AND user_id = ? LIMIT 1",
+        [jobId, req.user.id]
+      );
+
+      if (!jobRow) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      await db.promise().query("START TRANSACTION");
+
+      if (clientUpdates.length > 0) {
+        await db.promise().query(
+          `UPDATE Clients SET ${clientUpdates.join(", ")} WHERE id = ?`,
+          [...clientValues, jobRow.client_id]
+        );
+      }
+
+      if (jobUpdates.length > 0) {
+        await db.promise().query(
+          `UPDATE Jobs SET ${jobUpdates.join(", ")} WHERE id = ? AND user_id = ?`,
+          [...jobValues, jobId, req.user.id]
+        );
+      }
+
+      await db.promise().query("COMMIT");
+      return res.json({ message: "Job updated successfully" });
+    } catch (err) {
+      await db.promise().query("ROLLBACK");
       console.error("Error updating job:", err);
       return res.status(500).json({ error: "Database error" });
     }
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Job not found" });
-    }
-    return res.json({ message: "Job status updated successfully" });
-  });
-});
+  }
+);
 
 const PORT = process.env.PORT || 5000;
 (async () => {

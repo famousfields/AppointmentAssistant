@@ -1,5 +1,6 @@
 import { useApi } from './apiContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import JobEditorModal from './JobEditorModal'
 
 export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
@@ -11,6 +12,9 @@ export default function JobsList({ currentUser }) {
   const [isSavingComments, setIsSavingComments] = useState(false)
   const [paymentErrors, setPaymentErrors] = useState({})
   const [savingPayments, setSavingPayments] = useState({})
+  const [editingJob, setEditingJob] = useState(null)
+  const [isSavingJob, setIsSavingJob] = useState(false)
+  const [editError, setEditError] = useState('')
   const { fetchWithAuth } = useApi()
 
   const fetchJobs = useCallback(async () => {
@@ -131,7 +135,7 @@ export default function JobsList({ currentUser }) {
     if (!text) return 'No notes yet'
     const cleaned = text.replace(/\s+/g, ' ').trim()
     if (!cleaned) return 'No notes yet'
-    return cleaned.length > 70 ? `${cleaned.slice(0, 70)}...` : cleaned
+    return cleaned.length > 100 ? `${cleaned.slice(0, 100)}...` : cleaned
   }
 
   const totalPayments = useMemo(
@@ -146,10 +150,40 @@ export default function JobsList({ currentUser }) {
     setModalError('')
   }
 
+  const openEditModal = (job) => {
+    setEditingJob(job)
+    setEditError('')
+  }
+
   const closeCommentsModal = () => {
     setSelectedJob(null)
     setCommentDraft('')
     setModalError('')
+  }
+
+  const closeEditModal = () => {
+    setEditingJob(null)
+    setEditError('')
+  }
+
+  const applyJobUpdate = (jobId, updates) => {
+    setJobs((prev) =>
+      prev.map((job) => {
+        if (job.id !== jobId) return job
+        return {
+          ...job,
+          ...updates,
+          payment:
+            updates.payment !== undefined
+              ? Number(updates.payment).toFixed(2)
+              : job.payment,
+          comments:
+            updates.comments !== undefined
+              ? updates.comments || null
+              : job.comments
+        }
+      })
+    )
   }
 
   const saveComments = async () => {
@@ -182,6 +216,45 @@ export default function JobsList({ currentUser }) {
       setModalError(err.message || 'Unable to save notes')
     } finally {
       setIsSavingComments(false)
+    }
+  }
+
+  const saveJobEdits = async (updates) => {
+    if (!editingJob) return
+
+    setIsSavingJob(true)
+    setEditError('')
+
+    try {
+      const res = await fetchWithAuth(`/jobs/${editingJob.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to update job')
+      }
+
+      applyJobUpdate(editingJob.id, {
+        name: updates.name,
+        phone: updates.phone,
+        address: updates.address,
+        job_type: updates.jobType,
+        job_date: updates.jobDate,
+        status: updates.status,
+        payment: updates.payment,
+        comments: updates.comments
+      })
+      closeEditModal()
+    } catch (err) {
+      console.error('Error updating job:', err)
+      setEditError(err.message || 'Unable to update job')
+    } finally {
+      setIsSavingJob(false)
     }
   }
 
@@ -244,6 +317,7 @@ export default function JobsList({ currentUser }) {
                 <th>Status</th>
                 <th>Payment</th>
                 <th>Comments</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -299,6 +373,15 @@ export default function JobsList({ currentUser }) {
                       <p className="comments-preview">{getCommentPreview(job.comments)}</p>
                     </div>
                   </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="comments-button"
+                      onClick={() => openEditModal(job)}
+                    >
+                      Edit job
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -342,6 +425,15 @@ export default function JobsList({ currentUser }) {
           </div>
         </div>
       )}
+
+      <JobEditorModal
+        key={editingJob?.id || 'jobs-editor'}
+        job={editingJob}
+        saving={isSavingJob}
+        error={editError}
+        onClose={closeEditModal}
+        onSave={saveJobEdits}
+      />
     </div>
   )
 }

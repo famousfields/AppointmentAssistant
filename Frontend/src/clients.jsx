@@ -1,5 +1,6 @@
 import { useApi } from './apiContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import JobEditorModal from './JobEditorModal'
 
 const formatDate = (dateString) => {
   if (!dateString) return '-'
@@ -56,6 +57,9 @@ export default function ClientsList({ currentUser }) {
   const [error, setError] = useState('')
   const [activeClientId, setActiveClientId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
+  const [editingJob, setEditingJob] = useState(null)
+  const [isSavingJob, setIsSavingJob] = useState(false)
+  const [editError, setEditError] = useState('')
   const { fetchWithAuth } = useApi()
 
   const fetchJobs = useCallback(async () => {
@@ -102,6 +106,70 @@ export default function ClientsList({ currentUser }) {
   const containerClasses = ['clients-page']
   if (!selectedClient) {
     containerClasses.push('clients-page--no-selection')
+  }
+
+  const closeEditModal = () => {
+    setEditingJob(null)
+    setEditError('')
+  }
+
+  const applyJobUpdate = (jobId, updates) => {
+    setJobs((prev) =>
+      prev.map((job) => {
+        if (job.id !== jobId) return job
+        return {
+          ...job,
+          ...updates,
+          payment:
+            updates.payment !== undefined
+              ? Number(updates.payment).toFixed(2)
+              : job.payment,
+          comments:
+            updates.comments !== undefined
+              ? updates.comments || null
+              : job.comments
+        }
+      })
+    )
+  }
+
+  const saveJobEdits = async (updates) => {
+    if (!editingJob) return
+
+    setIsSavingJob(true)
+    setEditError('')
+
+    try {
+      const res = await fetchWithAuth(`/jobs/${editingJob.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to update job')
+      }
+
+      applyJobUpdate(editingJob.id, {
+        name: updates.name,
+        phone: updates.phone,
+        address: updates.address,
+        job_type: updates.jobType,
+        job_date: updates.jobDate,
+        status: updates.status,
+        payment: updates.payment,
+        comments: updates.comments
+      })
+      closeEditModal()
+    } catch (err) {
+      console.error('Error updating job from clients page:', err)
+      setEditError(err.message || 'Unable to update job')
+    } finally {
+      setIsSavingJob(false)
+    }
   }
 
   return (
@@ -214,6 +282,7 @@ export default function ClientsList({ currentUser }) {
                   <th>Status</th>
                   <th>Payment</th>
                   <th>Comments</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -224,6 +293,18 @@ export default function ClientsList({ currentUser }) {
                     <td>{job.status}</td>
                     <td>{formatCurrency(job.payment)}</td>
                     <td>{job.comments || 'No notes yet'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="comments-button"
+                        onClick={() => {
+                          setEditingJob(job)
+                          setEditError('')
+                        }}
+                      >
+                        Edit job
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -231,6 +312,15 @@ export default function ClientsList({ currentUser }) {
           </div>
         )}
       </section>
+
+      <JobEditorModal
+        key={editingJob?.id || 'clients-editor'}
+        job={editingJob}
+        saving={isSavingJob}
+        error={editError}
+        onClose={closeEditModal}
+        onSave={saveJobEdits}
+      />
     </div>
   )
 }
