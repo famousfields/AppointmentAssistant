@@ -256,6 +256,9 @@
 
 .page-content {
   min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
 .page-content--login {
@@ -273,12 +276,16 @@
 
 .login-card,
 .job-form {
-  width: min(100%, 540px);
+  width: min(100%, 750px);
   padding: 32px;
   border-radius: var(--radius-xl);
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.job-form {
+  text-align: center;
 }
 
 .login-card h2 {
@@ -343,6 +350,12 @@
   color: var(--text-heading);
   padding: 14px 16px;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.form-group input[type="date"],
+.form-group input[type="number"] {
+  text-align: center;
+  margin-left: 5px;
 }
 
 .login-card input:focus,
