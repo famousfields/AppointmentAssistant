@@ -20,23 +20,33 @@ const REFRESH_TOKEN_TTL_DAYS = Number.parseInt(process.env.REFRESH_TOKEN_TTL_DAY
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "";
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || (IS_PRODUCTION ? "None" : "Lax");
+const COOKIE_SECURE = (process.env.COOKIE_SECURE || `${IS_PRODUCTION}`) === "true";
 
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:5174",
   "http://127.0.0.1:5174",
-  "http://localhost:3000"
+  "http://localhost:3000",
+  "https://appointmentassistant.netlify.app"
 ];
 const allowedOrigins = (
   (process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.split(",")) || DEFAULT_CORS_ORIGINS
 )
   .map((origin) => origin.trim())
   .filter(Boolean);
+const allowedOriginRegexes = ((process.env.CORS_ORIGIN_REGEXES && process.env.CORS_ORIGIN_REGEXES.split(",")) || [])
+  .map((pattern) => pattern.trim())
+  .filter(Boolean)
+  .map((pattern) => new RegExp(pattern));
+
+const isAllowedOrigin = (origin) =>
+  allowedOrigins.includes(origin) || allowedOriginRegexes.some((pattern) => pattern.test(origin));
 
 const getRefreshCookieOptions = () => ({
-  secure: IS_PRODUCTION,
-  sameSite: "Lax",
+  secure: COOKIE_SECURE,
+  sameSite: COOKIE_SAME_SITE,
   maxAgeSeconds: REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60
 });
 
@@ -44,6 +54,9 @@ const validateRuntimeConfig = () => {
   const missing = [];
   if (!ACCESS_TOKEN_SECRET) missing.push("ACCESS_TOKEN_SECRET");
   if (!REFRESH_TOKEN_SECRET) missing.push("REFRESH_TOKEN_SECRET");
+  if (COOKIE_SAME_SITE.toLowerCase() === "none" && !COOKIE_SECURE) {
+    missing.push("COOKIE_SECURE=true (required when COOKIE_SAME_SITE=None)");
+  }
 
   if (missing.length > 0) {
     throw new Error(`Missing required env vars: ${missing.join(", ")}`);
@@ -123,15 +136,20 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Origin not allowed by CORS"));
-    },
-    credentials: true
-  })
-);
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || isAllowedOrigin(origin)) return callback(null, true);
+    console.warn(`Blocked CORS origin: ${origin}`);
+    return callback(new Error("Origin not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(
   createRateLimiter({
