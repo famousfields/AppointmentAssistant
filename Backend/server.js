@@ -136,6 +136,13 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    console.log(`Preflight request for ${req.path} from origin: ${req.headers.origin || "unknown"}`);
+  }
+  next();
+});
+
 const corsOptions = {
   origin(origin, callback) {
     if (!origin || isAllowedOrigin(origin)) return callback(null, true);
@@ -149,6 +156,13 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options("/users", cors(corsOptions));
+app.options("/auth/login", cors(corsOptions));
+app.options("/auth/refresh", cors(corsOptions));
+app.options("/auth/logout", cors(corsOptions));
+app.options("/jobs", cors(corsOptions));
+app.options("/jobs/:id", cors(corsOptions));
+app.options("/jobs/:id/comments", cors(corsOptions));
 app.use(express.json());
 app.use(
   createRateLimiter({
