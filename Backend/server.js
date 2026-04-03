@@ -155,7 +155,7 @@ const corsOptions = {
   optionsSuccessStatus: 204
 };
 
-app.use(cors(corsOptions));
+app.use(cors(origin='https://appointmentassistant.netlify.app'));
 app.options("/users", cors(corsOptions));
 app.options("/auth/login", cors(corsOptions));
 app.options("/auth/refresh", cors(corsOptions));
