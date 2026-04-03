@@ -31,18 +31,24 @@ const DEFAULT_CORS_ORIGINS = [
   "http://localhost:3000",
   "https://appointmentassistant.netlify.app"
 ];
+const normalizeOrigin = (origin) => origin.trim().replace(/\/+$/, "");
 const allowedOrigins = (
   (process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.split(",")) || DEFAULT_CORS_ORIGINS
 )
-  .map((origin) => origin.trim())
+  .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 const allowedOriginRegexes = ((process.env.CORS_ORIGIN_REGEXES && process.env.CORS_ORIGIN_REGEXES.split(",")) || [])
   .map((pattern) => pattern.trim())
   .filter(Boolean)
   .map((pattern) => new RegExp(pattern));
 
-const isAllowedOrigin = (origin) =>
-  allowedOrigins.includes(origin) || allowedOriginRegexes.some((pattern) => pattern.test(origin));
+const isAllowedOrigin = (origin) => {
+  const normalizedOrigin = normalizeOrigin(origin);
+  return (
+    allowedOrigins.includes(normalizedOrigin) ||
+    allowedOriginRegexes.some((pattern) => pattern.test(normalizedOrigin))
+  );
+};
 
 const getRefreshCookieOptions = () => ({
   secure: COOKIE_SECURE,
@@ -155,7 +161,7 @@ const corsOptions = {
   optionsSuccessStatus: 204
 };
 
-app.use(cors(origin='https://appointmentassistant.netlify.app'));
+app.use(cors(corsOptions));
 app.options("/users", cors(corsOptions));
 app.options("/auth/login", cors(corsOptions));
 app.options("/auth/refresh", cors(corsOptions));
