@@ -213,14 +213,14 @@ function AppContent() {
   return (
     <div className={`app-shell${isLogin ? ' app-shell--login' : ''}`}>
       {!isLogin && (
-        <aside className="app-sidebar">
-          <div className="sidebar-brand-block">
-            <div className="sidebar-brand-mark">AA</div>
-            <div>
-              <p className="sidebar-eyebrow">Appointment toolkit</p>
-              <h1 className="sidebar-brand-title">Appointment Assistant</h1>
-            </div>
-          </div>
+            <aside className="app-sidebar">
+              <div className="sidebar-brand-block">
+                <div className="sidebar-brand-mark">AA</div>
+                <div>
+                  <p className="sidebar-eyebrow">Appointment toolkit</p>
+                  <h1 className="sidebar-brand-title">Appointment Assistant</h1>
+                </div>
+              </div>
 
           <button type="button" className="sidebar-primary-action" onClick={() => navigate('/jobs/new')}>
             <span className="sidebar-primary-action-icon">+</span>
