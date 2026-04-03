@@ -107,6 +107,7 @@ const buildCalendarGroups = (jobs, visibleMonth) => {
 export default function App() {
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState(null)
+  const [apiHealth, setApiHealth] = useState({ status: 'checking', message: 'Checking backend...' })
   const [activeTab, setActiveTab] = useState('jobs')
   const [jobs, setJobs] = useState([])
   const [jobsLoading, setJobsLoading] = useState(false)
@@ -133,6 +134,39 @@ export default function App() {
       setReady(true)
     }
     bootstrap()
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const checkBackend = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/health`)
+        if (!response.ok) {
+          throw new Error(`Backend responded with ${response.status}`)
+        }
+
+        await response.json().catch(() => ({}))
+        if (active) {
+          setApiHealth({
+            status: 'success',
+            message: `Connected to ${API_BASE}`
+          })
+        }
+      } catch (error) {
+        if (active) {
+          setApiHealth({
+            status: 'error',
+            message: `Cannot reach ${API_BASE}`
+          })
+        }
+      }
+    }
+
+    checkBackend()
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
@@ -361,6 +395,12 @@ export default function App() {
             <Text style={commonStyles.text}>
               This mobile client mirrors the web frontend with stacked cards and touch-friendly controls.
             </Text>
+            <View style={commonStyles.chip}>
+              <Text style={commonStyles.chipText}>API {API_BASE}</Text>
+            </View>
+            <Text style={apiHealth.status === 'error' ? commonStyles.errorText : apiHealth.status === 'success' ? commonStyles.successText : commonStyles.text}>
+              {apiHealth.message}
+            </Text>
           </Panel>
           <View style={commonStyles.panel}>
             <View style={styles.tabs}>
@@ -387,6 +427,9 @@ export default function App() {
       <ScrollView contentContainerStyle={commonStyles.content}>
         <Panel title={activeTab === 'jobs-new' ? 'Create a new job' : activeTab === 'jobs' ? 'Job dashboard' : activeTab === 'clients' ? 'Client relationships' : 'Calendar overview'} subtitle="Workspace overview">
           <Text style={commonStyles.text}>Signed in as {session.user?.name || session.user?.email || 'Workspace user'}.</Text>
+          <Text style={apiHealth.status === 'error' ? commonStyles.errorText : apiHealth.status === 'success' ? commonStyles.successText : commonStyles.text}>
+            {apiHealth.message}
+          </Text>
           <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={logout}>
             <Text style={commonStyles.buttonText}>Logout</Text>
           </Pressable>
