@@ -1,12 +1,10 @@
 require("dotenv").config();
 const mysql = require("mysql2");
 
+const UrlDB = `mysql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.PORT}/${process.env.DB_NAME}`;
 // create connection
 const db = mysql.createConnection({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "Jobs"
+  uri: UrlDB
 });
 
 // connect
