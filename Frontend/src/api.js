@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env?.REACT_APP_VITE_API_BASE || 'http://localhost:5000'
+export const API_BASE = import.meta.env?.VITE_API_BASE || 'http://localhost:5000'
 
 const normalizeBase64Url = (value) => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')

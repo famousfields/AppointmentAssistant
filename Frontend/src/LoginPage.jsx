@@ -147,8 +147,8 @@ export default function LoginPage({ onLogin }) {
           <h2>{isCreateMode ? 'Create your account' : 'Welcome back'}</h2>
           <p className="login-subtitle">
             {isCreateMode
-              ? 'Set up your workspace with a few details to start tracking appointments.'
-              : 'Sign in to manage jobs, clients, and follow-up notes in one place.'}
+              ? 'Create an account to manage clients, track appointments, and keep every job organized in one place.'
+              : 'Sign in to manage clients, review jobs, and stay on top of your upcoming appointments.'}
           </p>
         </div>
 
@@ -211,7 +211,7 @@ export default function LoginPage({ onLogin }) {
         </button>
 
         {status && <p className={`form-status form-status--${status.type}`}>{status.message}</p>}
-        <p className="login-note">Your account actions stay connected to the existing backend endpoints.</p>
+        <p className="login-note">Use your account to access your client list, calendar, job history, and appointment updates.</p>
       </form>
     </div>
   )
