@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Appointment Assistant",
+    "slug": "appointment-assistant-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}

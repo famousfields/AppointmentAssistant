@@ -5,6 +5,7 @@ Appointment Assistant is a two-tier toolkit for capturing service jobs, tracking
 ## Architecture overview
 - **Backend (`Backend/`)** - Express server with MySQL connectivity, user management, job/comment APIs, signed access tokens, and cookie-based refresh token rotation.
 - **Frontend (`Frontend/`)** - React 19 + Vite SPA that renders the app shell, job form, jobs/clients tables, and a monthly calendar.
+- **Mobile client (`MobileClient/`)** - Expo + React Native app that mirrors the same core flows in a phone-first stacked layout.
 - **Shared schemas** - `Schema.json` documents the `users`, `clients`, and `jobs` contracts so the UI and API stay aligned.
 
 ## Backend highlights
@@ -28,6 +29,11 @@ Appointment Assistant is a two-tier toolkit for capturing service jobs, tracking
 - `clients.jsx` groups jobs by client, adds search, and shows job histories.
 - `CalendarPage.jsx` renders a month grid, highlights today, and shows job details on click.
 - `ApiContext` centralizes authenticated requests, sends cookies with API calls, retries after hitting `/auth/refresh`, and keeps the UI aligned with the latest access token.
+
+## Mobile client highlights
+- `MobileClient/App.js` recreates login, job creation, jobs, clients, and calendar flows in a vertically stacked mobile layout.
+- `MobileClient/src/api.js` stores tokens and job drafts in `AsyncStorage` and reuses the backend auth/job routes.
+- `MobileClient/src/theme.js` ports the existing dark card palette and rounded component styling into React Native.
 
 ## Setup and running
 

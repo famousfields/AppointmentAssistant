@@ -276,7 +276,8 @@ app.post(
       return res.json({
         message: "Login successful",
         user: { id: user.id, name: user.name, email: user.email },
-        accessToken
+        accessToken,
+        refreshToken
       });
     } catch (err) {
       console.error("Login error:", err);
@@ -322,7 +323,7 @@ app.post("/auth/refresh", authLimiter, async (req, res) => {
     const accessToken = createAccessToken(user, ACCESS_TOKEN_SECRET, ACCESS_TOKEN_TTL_MS);
     const nextRefreshToken = await rotateRefreshToken(user, refreshToken);
     res.setHeader("Set-Cookie", serializeRefreshTokenCookie(nextRefreshToken, getRefreshCookieOptions()));
-    return res.json({ accessToken, user });
+    return res.json({ accessToken, refreshToken: nextRefreshToken, user });
   } catch (error) {
     res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
     return res.status(401).json({ error: "Invalid or expired refresh token" });
