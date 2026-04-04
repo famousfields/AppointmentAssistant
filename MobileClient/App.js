@@ -151,6 +151,7 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', confirmPassword: '' })
+  const [authErrors, setAuthErrors] = useState({})
   const [authStatus, setAuthStatus] = useState(null)
   const [authSubmitting, setAuthSubmitting] = useState(false)
   const [jobForm, setJobForm] = useState(EMPTY_JOB_FORM)
@@ -271,30 +272,113 @@ export default function App() {
   const validateJobField = (name, value) => {
     switch (name) {
       case 'name':
-        return value.trim().length >= 2 ? '' : 'Enter a valid name'
+        return value.trim().length >= 2 ? '' : 'Enter the client name using at least 2 characters.'
       case 'phone': {
         const digits = value.replace(/\D/g, '')
-        return digits.length >= 7 && digits.length <= 15 ? '' : 'Phone must be 7-15 digits'
+        return digits.length >= 7 && digits.length <= 15 ? '' : 'Enter a phone number with 7 to 15 digits.'
       }
       case 'address':
-        return value.trim().length >= 5 ? '' : 'Enter a valid address'
+        return value.trim().length >= 5 ? '' : 'Enter a fuller address so the job location is clear.'
       case 'jobType':
-        return value.trim() ? '' : 'Job type is required'
+        return value.trim() ? '' : 'Choose or enter the type of job you are scheduling.'
       case 'jobDate':
-        return value ? '' : 'Date is required'
+        return value ? '' : 'Pick a date for this appointment.'
       case 'payment':
-        return !value || /^\d+(\.\d{0,2})?$/.test(value) ? '' : 'Payment must be a valid amount'
+        return !value || /^\d+(\.\d{0,2})?$/.test(value) ? '' : 'Enter a valid payment amount, for example 125 or 125.00.'
       case 'comments':
-        return value.length <= 500 ? '' : 'Comments max 500 chars'
+        return value.length <= 500 ? '' : 'Keep notes under 500 characters.'
       default:
         return ''
     }
   }
 
+  const validateAuthField = (name, value, mode = authMode) => {
+    const trimmed = String(value || '').trim()
+
+    switch (name) {
+      case 'username':
+        if (!trimmed) {
+          return mode === 'create'
+            ? 'Choose a username before creating your account.'
+            : 'Enter your email or username to sign in.'
+        }
+        if (mode === 'create' && trimmed.length < 3) {
+          return 'Username must be at least 3 characters long.'
+        }
+        return ''
+      case 'email':
+        if (mode !== 'create') return ''
+        if (!trimmed) return 'Enter an email address for the new account.'
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? '' : 'Enter a valid email address.'
+      case 'password':
+        if (!value) {
+          return mode === 'create'
+            ? 'Create a password for the new account.'
+            : 'Enter your password to sign in.'
+        }
+        if (mode === 'create' && String(value).length < 8) {
+          return 'Password must be at least 8 characters long.'
+        }
+        return ''
+      case 'confirmPassword':
+        if (mode !== 'create') return ''
+        if (!value) return 'Re-enter the password to confirm it.'
+        return value === authForm.password ? '' : 'The password confirmation does not match.'
+      default:
+        return ''
+    }
+  }
+
+  const toFriendlyAuthError = (message, mode = authMode) => {
+    const normalized = String(message || '').toLowerCase()
+
+    if (normalized.includes('invalid credentials')) {
+      return 'That email, username, or password did not match our records.'
+    }
+    if (normalized.includes('duplicate') || normalized.includes('already') || normalized.includes('taken')) {
+      return mode === 'create'
+        ? 'That username or email is already in use. Try a different one or sign in instead.'
+        : 'That account already exists. Try signing in.'
+    }
+    if (normalized.includes('validation')) {
+      return 'Some details need attention before we can continue.'
+    }
+    if (normalized.includes('network') || normalized.includes('fetch') || normalized.includes('reach server')) {
+      return 'We could not reach the server. Check your connection and try again.'
+    }
+
+    return mode === 'create'
+      ? 'We could not create the account with those details.'
+      : 'We could not sign you in with those details.'
+  }
+
+  const toFriendlyJobError = (message) => {
+    const normalized = String(message || '').toLowerCase()
+
+    if (normalized.includes('validation')) {
+      return 'Some appointment details need to be corrected before saving.'
+    }
+    if (normalized.includes('invalid') && normalized.includes('date')) {
+      return 'Choose a valid appointment date before saving.'
+    }
+    if (normalized.includes('network') || normalized.includes('fetch') || normalized.includes('reach server')) {
+      return 'We could not reach the server. Check your connection and try again.'
+    }
+
+    return 'We could not save this appointment. Review the details and try again.'
+  }
+
   const submitAuth = async () => {
     const isCreate = authMode === 'create'
-    if (isCreate && authForm.password !== authForm.confirmPassword) {
-      setAuthStatus({ type: 'error', message: 'Passwords must match' })
+    const nextAuthErrors = Object.keys(authForm).reduce((accumulator, key) => {
+      const error = validateAuthField(key, authForm[key], authMode)
+      if (error) accumulator[key] = error
+      return accumulator
+    }, {})
+
+    setAuthErrors(nextAuthErrors)
+    if (Object.keys(nextAuthErrors).length > 0) {
+      setAuthStatus({ type: 'error', message: isCreate ? 'Please fix the highlighted account details.' : 'Please fix the highlighted sign-in details.' })
       return
     }
 
@@ -314,6 +398,7 @@ export default function App() {
         const payload = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create account')
         setAuthMode('login')
+        setAuthErrors({})
         setAuthStatus({ type: 'success', message: payload.message || 'Account created' })
       } else {
         const response = await fetch(`${API_BASE}/auth/login`, {
@@ -336,7 +421,7 @@ export default function App() {
         setActiveTab('jobs')
       }
     } catch (error) {
-      setAuthStatus({ type: 'error', message: error.message || 'Unable to reach server' })
+      setAuthStatus({ type: 'error', message: toFriendlyAuthError(error.message, authMode) })
     } finally {
       setAuthSubmitting(false)
     }
@@ -349,7 +434,12 @@ export default function App() {
       return accumulator
     }, {})
     setJobErrors(nextErrors)
-    if (Object.keys(nextErrors).length > 0 || !session) return
+    if (Object.keys(nextErrors).length > 0 || !session) {
+      if (Object.keys(nextErrors).length > 0) {
+        setJobStatus({ type: 'error', message: 'Please fix the highlighted appointment details.' })
+      }
+      return
+    }
 
     setJobStatus({ type: 'info', message: 'Saving appointment...' })
     try {
@@ -371,7 +461,7 @@ export default function App() {
       setActiveTab('jobs')
       await refreshJobs()
     } catch (error) {
-      setJobStatus({ type: 'error', message: error.message || 'Unable to create job' })
+      setJobStatus({ type: 'error', message: toFriendlyJobError(error.message) })
     }
   }
 
@@ -445,13 +535,43 @@ export default function App() {
             </Panel>
             <View style={commonStyles.panel}>
               <View style={styles.tabs}>
-                <Tab active={!isCreate} label="Login" onPress={() => setAuthMode('login')} />
-                <Tab active={isCreate} label="Create account" onPress={() => setAuthMode('create')} />
+                <Tab active={!isCreate} label="Login" onPress={() => {
+                  setAuthMode('login')
+                  setAuthErrors({})
+                  setAuthStatus(null)
+                }} />
+                <Tab active={isCreate} label="Create account" onPress={() => {
+                  setAuthMode('create')
+                  setAuthErrors({})
+                  setAuthStatus(null)
+                }} />
               </View>
-              <FormField label={isCreate ? 'Username' : 'Email or username'} value={authForm.username} onChangeText={(value) => setAuthForm((current) => ({ ...current, username: value }))} />
-              {isCreate ? <FormField label="Email" value={authForm.email} onChangeText={(value) => setAuthForm((current) => ({ ...current, email: value }))} /> : null}
-              <FormField label="Password" value={authForm.password} onChangeText={(value) => setAuthForm((current) => ({ ...current, password: value }))} secureTextEntry />
-              {isCreate ? <FormField label="Confirm password" value={authForm.confirmPassword} onChangeText={(value) => setAuthForm((current) => ({ ...current, confirmPassword: value }))} secureTextEntry /> : null}
+              <FormField label={isCreate ? 'Username' : 'Email or username'} value={authForm.username} onChangeText={(value) => {
+                setAuthForm((current) => ({ ...current, username: value }))
+                setAuthErrors((current) => ({ ...current, username: '' }))
+                setAuthStatus(null)
+              }} error={authErrors.username} />
+              {isCreate ? <FormField label="Email" value={authForm.email} onChangeText={(value) => {
+                setAuthForm((current) => ({ ...current, email: value }))
+                setAuthErrors((current) => ({ ...current, email: '' }))
+                setAuthStatus(null)
+              }} error={authErrors.email} /> : null}
+              <FormField label="Password" value={authForm.password} onChangeText={(value) => {
+                setAuthForm((current) => ({ ...current, password: value }))
+                setAuthErrors((current) => ({
+                  ...current,
+                  password: '',
+                  confirmPassword: authMode === 'create' && authForm.confirmPassword && authForm.confirmPassword !== value
+                    ? 'The password confirmation does not match.'
+                    : ''
+                }))
+                setAuthStatus(null)
+              }} error={authErrors.password} secureTextEntry />
+              {isCreate ? <FormField label="Confirm password" value={authForm.confirmPassword} onChangeText={(value) => {
+                setAuthForm((current) => ({ ...current, confirmPassword: value }))
+                setAuthErrors((current) => ({ ...current, confirmPassword: '' }))
+                setAuthStatus(null)
+              }} error={authErrors.confirmPassword} secureTextEntry /> : null}
               <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitAuth}>
                 <Text style={commonStyles.buttonText}>{authSubmitting ? 'Working...' : isCreate ? 'Create account' : 'Sign in'}</Text>
               </Pressable>
@@ -474,9 +594,6 @@ export default function App() {
         >
           <Panel title={activeTab === 'jobs-new' ? 'Create a new job' : activeTab === 'jobs' ? 'Job dashboard' : activeTab === 'clients' ? 'Client relationships' : 'Calendar overview'} subtitle="Workspace overview">
             <Text style={commonStyles.text}>Signed in as {session.user?.name || session.user?.email || 'Workspace user'}.</Text>
-            <Text style={apiHealth.status === 'error' ? commonStyles.errorText : apiHealth.status === 'success' ? commonStyles.successText : commonStyles.text}>
-              {apiHealth.message}
-            </Text>
             <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={logout}>
               <Text style={commonStyles.buttonText}>Logout</Text>
             </Pressable>
@@ -503,13 +620,41 @@ export default function App() {
           {activeTab === 'jobs-new' ? (
             <View style={commonStyles.panel}>
               <Text style={commonStyles.sectionTitle}>Appointment details</Text>
-              <FormField label="Client name" value={jobForm.name} onChangeText={(value) => setJobForm((current) => ({ ...current, name: value }))} error={jobErrors.name} />
-              <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => setJobForm((current) => ({ ...current, phone: value.replace(/\D/g, '') }))} error={jobErrors.phone} />
-              <FormField label="Address" value={jobForm.address} onChangeText={(value) => setJobForm((current) => ({ ...current, address: value }))} error={jobErrors.address} />
-              <FormField label="Job type" value={jobForm.jobType} onChangeText={(value) => setJobForm((current) => ({ ...current, jobType: value }))} error={jobErrors.jobType} />
-              <DateField label="Date" value={jobForm.jobDate} onChange={(value) => setJobForm((current) => ({ ...current, jobDate: value }))} error={jobErrors.jobDate} />
-              <FormField label="Payment" value={jobForm.payment} onChangeText={(value) => setJobForm((current) => ({ ...current, payment: value }))} error={jobErrors.payment} placeholder="0.00" />
-              <FormField label="Comments" value={jobForm.comments} onChangeText={(value) => setJobForm((current) => ({ ...current, comments: value }))} error={jobErrors.comments} multiline />
+              <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
+                setJobForm((current) => ({ ...current, name: value }))
+                setJobErrors((current) => ({ ...current, name: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.name} />
+              <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
+                setJobForm((current) => ({ ...current, phone: value.replace(/\D/g, '') }))
+                setJobErrors((current) => ({ ...current, phone: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.phone} />
+              <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
+                setJobForm((current) => ({ ...current, address: value }))
+                setJobErrors((current) => ({ ...current, address: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.address} />
+              <FormField label="Job type" value={jobForm.jobType} onChangeText={(value) => {
+                setJobForm((current) => ({ ...current, jobType: value }))
+                setJobErrors((current) => ({ ...current, jobType: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.jobType} />
+              <DateField label="Date" value={jobForm.jobDate} onChange={(value) => {
+                setJobForm((current) => ({ ...current, jobDate: value }))
+                setJobErrors((current) => ({ ...current, jobDate: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.jobDate} />
+              <FormField label="Payment" value={jobForm.payment} onChangeText={(value) => {
+                setJobForm((current) => ({ ...current, payment: value }))
+                setJobErrors((current) => ({ ...current, payment: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.payment} placeholder="0.00" />
+              <FormField label="Comments" value={jobForm.comments} onChangeText={(value) => {
+                setJobForm((current) => ({ ...current, comments: value }))
+                setJobErrors((current) => ({ ...current, comments: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.comments} multiline />
               {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
               <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob}><Text style={commonStyles.buttonText}>Save appointment</Text></Pressable>
             </View>
