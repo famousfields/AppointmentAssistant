@@ -48,12 +48,12 @@ export const getTokenExpiry = (token) => {
 }
 
 export const buildSessionRecord = ({ user, accessToken, refreshToken }) => {
-  if (!accessToken || !refreshToken) return null
+  if (!accessToken) return null
 
   return {
     user,
     accessToken,
-    refreshToken,
+    refreshToken: refreshToken || null,
     expiresAt: getTokenExpiry(accessToken)
   }
 }
@@ -64,13 +64,14 @@ export const loadStoredSession = async () => {
     if (!raw) return null
 
     const parsed = JSON.parse(raw)
-    if (!parsed.accessToken || !parsed.refreshToken) {
+    if (!parsed.accessToken) {
       await AsyncStorage.removeItem(SESSION_KEY)
       return null
     }
 
     return {
       ...parsed,
+      refreshToken: parsed.refreshToken || null,
       expiresAt: parsed.expiresAt ?? getTokenExpiry(parsed.accessToken)
     }
   } catch {
