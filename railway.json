@@ -1,0 +1,13 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "rootDirectory": "Backend"
+  },
+  "deploy": {
+    "startCommand": "npm run start",
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}

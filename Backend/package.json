@@ -9,6 +9,7 @@
     "mysql2": "^3.20.0"
   },
   "scripts": {
+    "build": "npm run check",
     "start": "node server.js",
     "migrate": "node runMigrations.js",
     "check": "node --check server.js && node --check db.js && node --check runMigrations.js && node --check auth.js",
