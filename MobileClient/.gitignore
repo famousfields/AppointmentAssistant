@@ -1,1 +1,9 @@
 .expo/
+/android/
+/ios/
+/node_modules/
+/.vscode/
+*.log
+*.env
+*.expo-shared/*
+*.expo-shared/*

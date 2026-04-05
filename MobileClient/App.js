@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -33,6 +34,8 @@ const NAV_ITEMS = [
   { key: 'calendar', label: 'Calendar' }
 ]
 
+const JOB_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
+
 const EMPTY_JOB_FORM = {
   name: '',
   phone: '',
@@ -48,7 +51,7 @@ const parseDateValue = (value) => {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
 
   if (typeof value === 'string') {
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
     if (match) {
       const [, year, month, day] = match
       const date = new Date(Number(year), Number(month) - 1, Number(day))
@@ -74,6 +77,11 @@ const formatDateValue = (value) => {
   return `${year}-${month}-${day}`
 }
 
+const getDateTimestamp = (value) => {
+  const date = parseDateValue(value)
+  return date ? date.getTime() : 0
+}
+
 const formatDate = (value) => {
   if (!value) return '-'
   const date = parseDateValue(value)
@@ -93,6 +101,12 @@ const formatMonth = (value) =>
   value.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
 const keyboardAvoidingBehavior = Platform.OS === 'ios' ? 'padding' : 'height'
+
+const buildJobPayload = (job) => ({
+  ...job,
+  jobDate: formatDateValue(job.jobDate),
+  payment: job.payment === '' ? 0 : Number(job.payment)
+})
 
 const toDateKey = (date) => {
   const year = date.getFullYear()
@@ -115,7 +129,7 @@ const buildClients = (jobs) => {
   return Array.from(map.values())
     .map((client) => ({
       ...client,
-      jobs: [...client.jobs].sort((a, b) => new Date(b.job_date) - new Date(a.job_date)),
+      jobs: [...client.jobs].sort((a, b) => getDateTimestamp(b.job_date) - getDateTimestamp(a.job_date)),
       totalPayments: client.jobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0)
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -127,8 +141,8 @@ const buildCalendarGroups = (jobs, visibleMonth) => {
   const groups = new Map()
 
   jobs.forEach((job) => {
-    const date = new Date(job.job_date)
-    if (Number.isNaN(date.getTime())) return
+    const date = parseDateValue(job.job_date)
+    if (!date) return
     if (date.getFullYear() !== year || date.getMonth() !== month) return
     const key = toDateKey(date)
     if (!groups.has(key)) groups.set(key, [])
@@ -136,7 +150,7 @@ const buildCalendarGroups = (jobs, visibleMonth) => {
   })
 
   return Array.from(groups.entries())
-    .sort(([a], [b]) => new Date(a) - new Date(b))
+    .sort(([a], [b]) => getDateTimestamp(a) - getDateTimestamp(b))
     .map(([date, dayJobs]) => ({ date, jobs: dayJobs }))
 }
 
@@ -187,7 +201,6 @@ export default function App() {
         if (active) {
           setApiHealth({
             status: 'success',
-            message: `Connected to ${API_BASE}`
           })
         }
       } catch (error) {
@@ -282,7 +295,7 @@ export default function App() {
       case 'jobType':
         return value.trim() ? '' : 'Choose or enter the type of job you are scheduling.'
       case 'jobDate':
-        return value ? '' : 'Pick a date for this appointment.'
+        return parseDateValue(value) ? '' : 'Pick a valid date for this appointment.'
       case 'payment':
         return !value || /^\d+(\.\d{0,2})?$/.test(value) ? '' : 'Enter a valid payment amount, for example 125 or 125.00.'
       case 'comments':
@@ -445,10 +458,7 @@ export default function App() {
     try {
       const response = await apiFetch('/jobs', {
         method: 'POST',
-        body: JSON.stringify({
-          ...jobForm,
-          payment: jobForm.payment === '' ? 0 : Number(jobForm.payment)
-        }),
+        body: JSON.stringify(buildJobPayload(jobForm)),
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
         onSessionChange: setSession
@@ -485,10 +495,7 @@ export default function App() {
 
     const response = await apiFetch(`/jobs/${jobId}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        ...updates,
-        payment: updates.payment === '' ? 0 : Number(updates.payment)
-      }),
+      body: JSON.stringify(buildJobPayload(updates)),
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
       onSessionChange: setSession
@@ -498,6 +505,86 @@ export default function App() {
       throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to update job')
     }
     await refreshJobs()
+  }
+
+  const deleteJob = async (jobId) => {
+    if (!session) return
+
+    const response = await apiFetch(`/jobs/${jobId}`, {
+      method: 'DELETE',
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to delete job')
+    }
+    setSelectedJob(null)
+    await refreshJobs()
+  }
+
+  const confirmDeleteJob = (job) => {
+    Alert.alert(
+      'Delete job?',
+      `This will permanently remove the ${job.job_type} job for ${job.name}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteJob(job.id)
+            } catch (error) {
+              Alert.alert('Unable to delete job', error.message || 'Please try again.')
+            }
+          }
+        }
+      ]
+    )
+  }
+
+  const deleteClient = async (clientId) => {
+    if (!session) return
+
+    const response = await apiFetch(`/clients/${clientId}`, {
+      method: 'DELETE',
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Client deletion is not available on the current backend yet. Restart or redeploy the backend and try again.')
+      }
+      throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to delete client')
+    }
+
+    setSelectedJob((current) => (current?.client_id === clientId ? null : current))
+    await refreshJobs()
+  }
+
+  const confirmDeleteClient = (client) => {
+    Alert.alert(
+      'Delete client?',
+      `This will permanently remove ${client.name} and delete ${client.jobs.length} related job${client.jobs.length === 1 ? '' : 's'}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteClient(client.id)
+            } catch (error) {
+              Alert.alert('Unable to delete client', error.message || 'Please try again.')
+            }
+          }
+        }
+      ]
+    )
   }
 
   if (!ready) {
@@ -524,11 +611,8 @@ export default function App() {
           >
             <Panel title="Appointment Assistant" subtitle="Appointment toolkit">
               <Text style={commonStyles.text}>
-                This mobile client mirrors the web frontend with stacked cards and touch-friendly controls.
+                Manage client appointments, track job details, and keep your schedule organized from one mobile workspace.
               </Text>
-              <View style={commonStyles.chip}>
-                <Text style={commonStyles.chipText}>API {API_BASE}</Text>
-              </View>
               <Text style={apiHealth.status === 'error' ? commonStyles.errorText : apiHealth.status === 'success' ? commonStyles.successText : commonStyles.text}>
                 {apiHealth.message}
               </Text>
@@ -645,7 +729,7 @@ export default function App() {
                 setJobErrors((current) => ({ ...current, jobDate: '' }))
                 setJobStatus(null)
               }} error={jobErrors.jobDate} />
-              <FormField label="Payment" value={jobForm.payment} onChangeText={(value) => {
+              <CurrencyField label="Payment" value={jobForm.payment} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, payment: value }))
                 setJobErrors((current) => ({ ...current, payment: '' }))
                 setJobStatus(null)
@@ -668,7 +752,12 @@ export default function App() {
               </View>
               {filteredClients.map((client) => (
                 <View key={client.id} style={commonStyles.panel}>
-                  <Text style={commonStyles.heading3}>{client.name}</Text>
+                  <View style={commonStyles.rowBetween}>
+                    <Text style={commonStyles.heading3}>{client.name}</Text>
+                    <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => confirmDeleteClient(client)}>
+                      <Text style={styles.inlineActionText}>Delete</Text>
+                    </Pressable>
+                  </View>
                   <Text style={commonStyles.text}>{client.phone || '-'} | {client.address || '-'}</Text>
                   <View style={commonStyles.chip}><Text style={commonStyles.chipText}>{client.jobs.length} jobs - {formatCurrency(client.totalPayments)}</Text></View>
                   {client.jobs.map((job) => (
@@ -708,7 +797,7 @@ export default function App() {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
-      <JobModal job={selectedJob} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} />
+      <JobModal job={selectedJob} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
     </SafeAreaView>
   )
 }
@@ -728,6 +817,24 @@ function FormField({ label, error, multiline, ...props }) {
     <View>
       <Text style={commonStyles.label}>{label}</Text>
       <TextInput style={[commonStyles.input, multiline ? styles.multiline : null]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
+      {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
+    </View>
+  )
+}
+
+function CurrencyField({ label, error, ...props }) {
+  return (
+    <View>
+      <Text style={commonStyles.label}>{label}</Text>
+      <View style={styles.currencyField}>
+        <Text style={styles.currencySymbol}>$</Text>
+        <TextInput
+          style={styles.currencyInput}
+          placeholderTextColor={colors.textMuted}
+          keyboardType="decimal-pad"
+          {...props}
+        />
+      </View>
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
     </View>
   )
@@ -808,6 +915,47 @@ function DateField({ label, value, onChange, error }) {
   )
 }
 
+function SelectField({ label, value, onChange, error, options }) {
+  const [visible, setVisible] = useState(false)
+
+  return (
+    <View>
+      <Text style={commonStyles.label}>{label}</Text>
+      <Pressable style={[commonStyles.input, styles.dateField]} onPress={() => setVisible(true)}>
+        <Text style={value ? styles.dateFieldText : styles.dateFieldPlaceholder}>
+          {value || 'Choose an option'}
+        </Text>
+      </Pressable>
+      {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
+
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.dateModalPanel}>
+            <Text style={commonStyles.sectionTitle}>Choose a status</Text>
+            <View style={styles.optionList}>
+              {options.map((option) => (
+                <Pressable
+                  key={option}
+                  style={[styles.optionRow, value === option ? styles.optionRowActive : null]}
+                  onPress={() => {
+                    onChange(option)
+                    setVisible(false)
+                  }}
+                >
+                  <Text style={styles.optionText}>{option}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={() => setVisible(false)}>
+              <Text style={commonStyles.buttonText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  )
+}
+
 function Tab({ active, label, onPress }) {
   return <Chip label={label} active={active} onPress={onPress} grow />
 }
@@ -837,7 +985,7 @@ function JobCard({ job, onPress }) {
   )
 }
 
-function JobModal({ job, onClose, onSave }) {
+function JobModal({ job, onClose, onSave, onDelete }) {
   const [formState, setFormState] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -896,8 +1044,8 @@ function JobModal({ job, onClose, onSave }) {
               <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} />
               <FormField label="Job type" value={formState?.jobType || ''} onChangeText={(value) => setFormState((current) => ({ ...current, jobType: value }))} />
               <DateField label="Date" value={formState?.jobDate || ''} onChange={(value) => setFormState((current) => ({ ...current, jobDate: value }))} />
-              <FormField label="Status" value={formState?.status || ''} onChangeText={(value) => setFormState((current) => ({ ...current, status: value }))} placeholder="Pending, In Progress, Completed, Cancelled" />
-              <FormField label="Payment" value={formState?.payment || ''} onChangeText={(value) => setFormState((current) => ({ ...current, payment: value }))} placeholder="0.00" />
+              <SelectField label="Status" value={formState?.status || ''} onChange={(value) => setFormState((current) => ({ ...current, status: value }))} options={JOB_STATUS_OPTIONS} />
+              <CurrencyField label="Payment" value={formState?.payment || ''} onChangeText={(value) => setFormState((current) => ({ ...current, payment: value }))} placeholder="0.00" />
               <FormField label="Comments" value={formState?.comments || ''} onChangeText={(value) => setFormState((current) => ({ ...current, comments: value }))} multiline />
               {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
               <View style={styles.modalActions}>
@@ -908,6 +1056,9 @@ function JobModal({ job, onClose, onSave }) {
                   <Text style={commonStyles.buttonText}>{saving ? 'Saving...' : 'Save changes'}</Text>
                 </Pressable>
               </View>
+              <Pressable style={[commonStyles.button, styles.deleteButton]} onPress={() => onDelete?.(job)} disabled={saving}>
+                <Text style={commonStyles.buttonText}>Delete job</Text>
+              </Pressable>
               <View style={commonStyles.chip}>
                 <Text style={commonStyles.chipText}>Original date {formatDate(job.job_date)}</Text>
               </View>
@@ -938,6 +1089,28 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: 'rgba(109, 124, 255, 0.18)', borderColor: colors.borderStrong },
   chipGrow: { flex: 1 },
   chipText: { color: colors.heading, fontWeight: '700' },
+  currencyField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.input,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    paddingLeft: 14
+  },
+  currencySymbol: {
+    color: colors.heading,
+    fontSize: 15,
+    fontWeight: '700',
+    marginRight: 8
+  },
+  currencyInput: {
+    flex: 1,
+    color: colors.heading,
+    paddingRight: 14,
+    paddingVertical: 14,
+    fontSize: 15
+  },
   dateField: { gap: 6 },
   dateFieldText: { color: colors.heading, fontSize: 15 },
   dateFieldPlaceholder: { color: colors.textMuted, fontSize: 15 },
@@ -952,6 +1125,41 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16
   },
+  optionList: { gap: 10 },
+  optionRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: colors.input,
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  optionRowActive: {
+    borderColor: colors.borderStrong,
+    backgroundColor: 'rgba(109, 124, 255, 0.14)'
+  },
+  optionText: {
+    color: colors.heading,
+    fontSize: 15,
+    fontWeight: '700'
+  },
+  inlineActionButton: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1
+  },
+  inlineDeleteButton: {
+    backgroundColor: 'rgba(251, 113, 133, 0.12)',
+    borderColor: 'rgba(251, 113, 133, 0.4)'
+  },
+  inlineActionText: {
+    color: colors.heading,
+    fontSize: 13,
+    fontWeight: '700'
+  },
   multiline: { minHeight: 120 },
   inlineCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.card, padding: 14, gap: 6 },
   inlineTitle: { color: colors.heading, fontWeight: '700', fontSize: 16 },
@@ -960,5 +1168,10 @@ const styles = StyleSheet.create({
   modalPanel: { maxHeight: '85%', backgroundColor: colors.panel, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: colors.border },
   modalContent: { padding: 20, gap: 14 },
   modalActions: { flexDirection: 'row', gap: 12 },
-  modalAction: { flex: 1 }
+  modalAction: { flex: 1 },
+  deleteButton: {
+    backgroundColor: 'rgba(251, 113, 133, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 113, 133, 0.4)'
+  }
 })

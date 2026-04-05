@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Appointment Assistant",
-    "slug": "appointment-assistant-mobile",
+    "slug": "swift-job-assistant-axion-9f3",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -10,6 +10,15 @@
     ],
     "plugins": [
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "android": {
+      "package": "com.anonymous.appointmentassistantmobile"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2866cd1c-d38e-4e56-9270-daac3fd8fb67"
+      }
+    },
+    "owner": "swift-job-assistant-axion-9f3"
   }
 }
