@@ -169,6 +169,7 @@ app.options("/auth/logout", cors(corsOptions));
 app.options("/jobs", cors(corsOptions));
 app.options("/jobs/:id", cors(corsOptions));
 app.options("/jobs/:id/comments", cors(corsOptions));
+app.options("/clients/:id", cors(corsOptions));
 app.use(express.json());
 app.use(
   createRateLimiter({
@@ -276,7 +277,8 @@ app.post(
       return res.json({
         message: "Login successful",
         user: { id: user.id, name: user.name, email: user.email },
-        accessToken
+        accessToken,
+        refreshToken
       });
     } catch (err) {
       console.error("Login error:", err);
@@ -322,7 +324,7 @@ app.post("/auth/refresh", authLimiter, async (req, res) => {
     const accessToken = createAccessToken(user, ACCESS_TOKEN_SECRET, ACCESS_TOKEN_TTL_MS);
     const nextRefreshToken = await rotateRefreshToken(user, refreshToken);
     res.setHeader("Set-Cookie", serializeRefreshTokenCookie(nextRefreshToken, getRefreshCookieOptions()));
-    return res.json({ accessToken, user });
+    return res.json({ accessToken, refreshToken: nextRefreshToken, user });
   } catch (error) {
     res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
     return res.status(401).json({ error: "Invalid or expired refresh token" });
@@ -604,6 +606,86 @@ app.put(
     }
   }
 );
+
+app.delete("/jobs/:id", requireAuth, async (req, res) => {
+  const jobId = Number(req.params.id);
+  if (Number.isNaN(jobId)) {
+    return res.status(400).json({ error: "Invalid job ID" });
+  }
+
+  try {
+    const [[jobRow]] = await db.promise().query(
+      "SELECT id, client_id FROM Jobs WHERE id = ? AND user_id = ? LIMIT 1",
+      [jobId, req.user.id]
+    );
+
+    if (!jobRow) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    await db.promise().query("START TRANSACTION");
+    await db.promise().query("DELETE FROM Jobs WHERE id = ? AND user_id = ?", [jobId, req.user.id]);
+
+    const [[remainingClientJobs]] = await db.promise().query(
+      "SELECT COUNT(*) AS count FROM Jobs WHERE client_id = ?",
+      [jobRow.client_id]
+    );
+
+    if (remainingClientJobs.count === 0) {
+      await db.promise().query("DELETE FROM Clients WHERE id = ?", [jobRow.client_id]);
+    }
+
+    await db.promise().query("COMMIT");
+    return res.json({ message: "Job deleted successfully" });
+  } catch (err) {
+    await db.promise().query("ROLLBACK");
+    console.error("Error deleting job:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.delete("/clients/:id", requireAuth, async (req, res) => {
+  const clientId = Number(req.params.id);
+  if (Number.isNaN(clientId)) {
+    return res.status(400).json({ error: "Invalid client ID" });
+  }
+
+  try {
+    const [[clientRow]] = await db.promise().query(
+      `
+        SELECT c.id
+        FROM Clients c
+        JOIN Jobs j ON j.client_id = c.id
+        WHERE c.id = ? AND j.user_id = ?
+        LIMIT 1
+      `,
+      [clientId, req.user.id]
+    );
+
+    if (!clientRow) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    await db.promise().query("START TRANSACTION");
+    await db.promise().query("DELETE FROM Jobs WHERE client_id = ? AND user_id = ?", [clientId, req.user.id]);
+
+    const [[remainingClientJobs]] = await db.promise().query(
+      "SELECT COUNT(*) AS count FROM Jobs WHERE client_id = ?",
+      [clientId]
+    );
+
+    if (remainingClientJobs.count === 0) {
+      await db.promise().query("DELETE FROM Clients WHERE id = ?", [clientId]);
+    }
+
+    await db.promise().query("COMMIT");
+    return res.json({ message: "Client deleted successfully" });
+  } catch (err) {
+    await db.promise().query("ROLLBACK");
+    console.error("Error deleting client:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || "0.0.0.0";
