@@ -163,6 +163,7 @@ export default function App() {
   const [jobsLoading, setJobsLoading] = useState(false)
   const [jobsError, setJobsError] = useState('')
   const [selectedJob, setSelectedJob] = useState(null)
+  const [selectedClient, setSelectedClient] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', confirmPassword: '' })
   const [authErrors, setAuthErrors] = useState({})
@@ -507,6 +508,16 @@ export default function App() {
     await refreshJobs()
   }
 
+  const saveClientUpdates = async (client, updates) => {
+    const primaryJobId = client?.jobs?.[0]?.id
+    if (!primaryJobId) {
+      throw new Error('Unable to update client')
+    }
+
+    await saveJobUpdates(primaryJobId, updates)
+    setSelectedClient(null)
+  }
+
   const deleteJob = async (jobId) => {
     if (!session) return
 
@@ -697,7 +708,7 @@ export default function App() {
               </Panel>
               {jobsLoading ? <Panel><Text style={commonStyles.text}>Loading jobs...</Text></Panel> : null}
               {jobsError ? <Panel><Text style={commonStyles.errorText}>{jobsError}</Text></Panel> : null}
-              {!jobsLoading && !jobsError ? jobs.map((job) => <JobCard key={job.id} job={job} onPress={() => setSelectedJob(job)} />) : null}
+              {!jobsLoading && !jobsError ? jobs.map((job) => <JobCard key={job.id} job={job} onPress={() => setSelectedJob(job)} onDelete={() => confirmDeleteJob(job)} />) : null}
             </>
           ) : null}
 
@@ -754,17 +765,35 @@ export default function App() {
                 <View key={client.id} style={commonStyles.panel}>
                   <View style={commonStyles.rowBetween}>
                     <Text style={commonStyles.heading3}>{client.name}</Text>
-                    <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => confirmDeleteClient(client)}>
-                      <Text style={styles.inlineActionText}>Delete</Text>
-                    </Pressable>
+                    <View style={styles.cardActionRow}>
+                      <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => setSelectedClient(client)}>
+                        <Text style={styles.inlineActionText}>Edit</Text>
+                      </Pressable>
+                      <Pressable style={styles.iconDeleteButton} onPress={() => confirmDeleteClient(client)}>
+                        <Text style={styles.iconDeleteText}>X</Text>
+                      </Pressable>
+                    </View>
                   </View>
                   <Text style={commonStyles.text}>{client.phone || '-'} | {client.address || '-'}</Text>
                   <View style={commonStyles.chip}><Text style={commonStyles.chipText}>{client.jobs.length} jobs - {formatCurrency(client.totalPayments)}</Text></View>
                   {client.jobs.map((job) => (
-                    <Pressable key={job.id} style={styles.inlineCard} onPress={() => setSelectedJob(job)}>
-                      <Text style={styles.inlineTitle}>{job.job_type}</Text>
-                      <Text style={commonStyles.text}>{formatDate(job.job_date)}</Text>
-                    </Pressable>
+                    <View key={job.id} style={styles.inlineCard}>
+                      <View style={commonStyles.rowBetween}>
+                        <Pressable style={styles.inlineContentButton} onPress={() => setSelectedJob(job)}>
+                          <Text style={styles.inlineTitle}>{job.job_type}</Text>
+                          <Text style={commonStyles.text}>{formatDate(job.job_date)}</Text>
+                        </Pressable>
+                        <View style={styles.cardActionRow}>
+                          <View style={styles.statusActionChip}><Text style={commonStyles.chipText}>{job.status}</Text></View>
+                          <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => setSelectedJob(job)}>
+                            <Text style={styles.inlineActionText}>Edit</Text>
+                          </Pressable>
+                          <Pressable style={styles.iconDeleteButton} onPress={() => confirmDeleteJob(job)}>
+                            <Text style={styles.iconDeleteText}>X</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
                   ))}
                 </View>
               ))}
@@ -786,10 +815,23 @@ export default function App() {
                 <View key={group.date} style={commonStyles.panel}>
                   <Text style={commonStyles.heading3}>{formatDate(group.date)}</Text>
                   {group.jobs.map((job) => (
-                    <Pressable key={job.id} style={styles.inlineCard} onPress={() => setSelectedJob(job)}>
-                      <Text style={styles.inlineTitle}>{job.name}</Text>
-                      <Text style={commonStyles.text}>{job.job_type} - {formatCurrency(job.payment)}</Text>
-                    </Pressable>
+                    <View key={job.id} style={styles.inlineCard}>
+                      <View style={commonStyles.rowBetween}>
+                        <Pressable style={styles.inlineContentButton} onPress={() => setSelectedJob(job)}>
+                          <Text style={styles.inlineTitle}>{job.name}</Text>
+                          <Text style={commonStyles.text}>{job.job_type} - {formatCurrency(job.payment)}</Text>
+                        </Pressable>
+                        <View style={styles.cardActionRow}>
+                          <View style={styles.statusActionChip}><Text style={commonStyles.chipText}>{job.status}</Text></View>
+                          <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => setSelectedJob(job)}>
+                            <Text style={styles.inlineActionText}>Edit</Text>
+                          </Pressable>
+                          <Pressable style={styles.iconDeleteButton} onPress={() => confirmDeleteJob(job)}>
+                            <Text style={styles.iconDeleteText}>X</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
                   ))}
                 </View>
               ))}
@@ -798,6 +840,7 @@ export default function App() {
         </ScrollView>
       </KeyboardAvoidingView>
       <JobModal job={selectedJob} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
+      <ClientModal client={selectedClient} onClose={() => setSelectedClient(null)} onSave={saveClientUpdates} />
     </SafeAreaView>
   )
 }
@@ -968,20 +1011,104 @@ function Chip({ active, label, onPress, grow }) {
   )
 }
 
-function JobCard({ job, onPress }) {
+function JobCard({ job, onPress, onDelete }) {
   return (
-    <Pressable style={commonStyles.panel} onPress={onPress}>
+    <View style={commonStyles.panel}>
       <View style={commonStyles.rowBetween}>
-        <Text style={commonStyles.heading3}>{job.name}</Text>
-        <View style={commonStyles.chip}><Text style={commonStyles.chipText}>{job.status}</Text></View>
+        <Pressable style={styles.jobCardContent} onPress={onPress}>
+          <Text style={commonStyles.heading3}>{job.name}</Text>
+        </Pressable>
+        <View style={styles.jobCardActions}>
+          <View style={styles.cardActionRow}>
+            <View style={styles.statusActionChip}><Text style={commonStyles.chipText}>{job.status}</Text></View>
+            <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={onPress}>
+              <Text style={styles.inlineActionText}>Edit</Text>
+            </Pressable>
+            <Pressable style={styles.iconDeleteButton} onPress={onDelete}>
+              <Text style={styles.iconDeleteText}>X</Text>
+            </Pressable>
+          </View>
+        </View>
       </View>
-      <Text style={commonStyles.text}>{formatDate(job.job_date)}</Text>
-      <Text style={commonStyles.text}>{job.job_type}</Text>
-      <Text style={commonStyles.text}>{job.phone || '-'}</Text>
-      <Text style={commonStyles.text}>{job.address || '-'}</Text>
-      <Text style={commonStyles.text}>Payment: {formatCurrency(job.payment)}</Text>
-      <Text style={commonStyles.text}>{job.comments || 'No notes yet'}</Text>
-    </Pressable>
+      <Pressable style={styles.jobCardContent} onPress={onPress}>
+        <Text style={commonStyles.text}>{formatDate(job.job_date)}</Text>
+        <Text style={commonStyles.text}>{job.job_type}</Text>
+        <Text style={commonStyles.text}>{job.phone || '-'}</Text>
+        <Text style={commonStyles.text}>{job.address || '-'}</Text>
+        <Text style={commonStyles.text}>Payment: {formatCurrency(job.payment)}</Text>
+        <Text style={commonStyles.text}>{job.comments || 'No notes yet'}</Text>
+      </Pressable>
+    </View>
+  )
+}
+
+function ClientModal({ client, onClose, onSave }) {
+  const [formState, setFormState] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!client) {
+      setFormState(null)
+      setSaving(false)
+      setError('')
+      return
+    }
+
+    setFormState({
+      name: client.name || '',
+      phone: client.phone || '',
+      address: client.address || ''
+    })
+  }, [client])
+
+  if (!client) return null
+
+  const handleSave = async () => {
+    if (!formState) return
+    setSaving(true)
+    setError('')
+
+    try {
+      await onSave(client, formState)
+    } catch (nextError) {
+      setError(nextError.message || 'Unable to update client')
+      setSaving(false)
+      return
+    }
+
+    setSaving(false)
+  }
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
+          <View style={styles.modalPanel}>
+            <ScrollView
+              contentContainerStyle={styles.modalContent}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets
+            >
+              <Text style={commonStyles.sectionTitle}>Edit client</Text>
+              <Text style={commonStyles.text}>Update the client details used across this client&apos;s jobs.</Text>
+              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} />
+              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: value.replace(/\D/g, '') }))} />
+              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} />
+              {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
+              <View style={styles.modalActions}>
+                <Pressable style={[commonStyles.button, commonStyles.buttonSecondary, styles.modalAction]} onPress={onClose}>
+                  <Text style={commonStyles.buttonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary, styles.modalAction]} onPress={handleSave} disabled={saving}>
+                  <Text style={commonStyles.buttonText}>{saving ? 'Saving...' : 'Save changes'}</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
   )
 }
 
@@ -1143,10 +1270,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700'
   },
+  jobCardContent: { gap: 6 },
+  jobCardActions: {
+    alignItems: 'flex-start',
+    gap: 8
+  },
+  cardActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
   inlineActionButton: {
-    minHeight: 36,
-    paddingHorizontal: 14,
-    borderRadius: 12,
+    minHeight: 32,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1
@@ -1155,10 +1293,44 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(251, 113, 133, 0.12)',
     borderColor: 'rgba(251, 113, 133, 0.4)'
   },
+  inlineEditButton: {
+    backgroundColor: 'rgba(109, 124, 255, 0.12)',
+    borderColor: colors.borderStrong
+  },
+  statusActionChip: {
+    minHeight: 32,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(109, 124, 255, 0.14)',
+    borderWidth: 1,
+    borderColor: colors.borderStrong
+  },
   inlineActionText: {
     color: colors.heading,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700'
+  },
+  iconDeleteButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(251, 113, 133, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 113, 133, 0.4)'
+  },
+  iconDeleteText: {
+    color: colors.heading,
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  inlineContentButton: {
+    flex: 1,
+    gap: 6
   },
   multiline: { minHeight: 120 },
   inlineCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.card, padding: 14, gap: 6 },
