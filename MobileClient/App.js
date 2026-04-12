@@ -1380,7 +1380,7 @@ function TimeField({ label, value, onChange, error }) {
         is24Hour: false,
         onChange: (event, nextDate) => {
           if (event.type === 'set' && nextDate) {
-            onChange(formatTimeValue(`${String(nextDate.getHours()).padStart(2, '0')}:${String(nextDate.getMinutes()).padStart(2, '0')}`))
+            onChange(`${String(nextDate.getHours()).padStart(2, '0')}:${String(nextDate.getMinutes()).padStart(2, '0')}`)
           }
         }
       })
@@ -1392,7 +1392,7 @@ function TimeField({ label, value, onChange, error }) {
   }
 
   const confirmIosTime = () => {
-    onChange(formatTimeValue(`${String(iosDraftTime.getHours()).padStart(2, '0')}:${String(iosDraftTime.getMinutes()).padStart(2, '0')}`))
+    onChange(`${String(iosDraftTime.getHours()).padStart(2, '0')}:${String(iosDraftTime.getMinutes()).padStart(2, '0')}`)
     setIosPickerVisible(false)
   }
 
