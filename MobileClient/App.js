@@ -28,13 +28,27 @@ import {
 import { colors, commonStyles } from './src/theme'
 
 const NAV_ITEMS = [
+  { key: 'calendar', label: 'Calendar' },
   { key: 'jobs', label: 'Jobs' },
   { key: 'jobs-new', label: 'New Job' },
-  { key: 'clients', label: 'Clients' },
-  { key: 'calendar', label: 'Calendar' }
+  { key: 'clients', label: 'Clients' }
 ]
 
 const JOB_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
+const JOB_TYPE_OPTIONS = ['0 Turn Mower', 'Push Mower', 'Riding Mower', 'Pressure Washer']
+const CALENDAR_VIEWS = [
+  { key: 'day', label: 'Daily' },
+  { key: 'week', label: 'Weekly' },
+  { key: 'month', label: 'Monthly' },
+  { key: 'year', label: 'Yearly' }
+]
+const PHONE_EXAMPLE = '(555) 123-4567'
+const JOB_TYPE_COLORS = {
+  '0 Turn Mower': { background: '#22c55e', border: '#16a34a', text: '#f0fdf4' },
+  'Push Mower': { background: '#f97316', border: '#ea580c', text: '#fff7ed' },
+  'Riding Mower': { background: '#3b82f6', border: '#2563eb', text: '#eff6ff' },
+  'Pressure Washer': { background: '#06b6d4', border: '#0891b2', text: '#ecfeff' }
+}
 
 const EMPTY_JOB_FORM = {
   name: '',
@@ -42,6 +56,7 @@ const EMPTY_JOB_FORM = {
   address: '',
   jobType: '',
   jobDate: '',
+  startTime: '',
   payment: '',
   comments: ''
 }
@@ -77,6 +92,25 @@ const formatDateValue = (value) => {
   return `${year}-${month}-${day}`
 }
 
+const parseTimeValue = (value) => {
+  if (!value) return null
+  const match = String(value).match(/^(\d{2}):(\d{2})/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return { hours, minutes }
+}
+
+const formatTimeValue = (value) => {
+  const parsed = parseTimeValue(value)
+  if (!parsed) return ''
+  return `${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}`
+}
+
 const getDateTimestamp = (value) => {
   const date = parseDateValue(value)
   return date ? date.getTime() : 0
@@ -100,11 +134,62 @@ const formatCurrency = (value) =>
 const formatMonth = (value) =>
   value.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
+const formatFullDate = (value) => {
+  const date = parseDateValue(value)
+  if (!date) return '-'
+
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+const formatTimeRange = (value) => {
+  const parsed = parseTimeValue(value)
+  if (!parsed) return '-'
+
+  const start = new Date(2000, 0, 1, parsed.hours, parsed.minutes)
+  const end = new Date(2000, 0, 1, parsed.hours + 1, parsed.minutes)
+
+  return `${start.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })} - ${end.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`
+}
+
+const normalizePhoneDigits = (value) =>
+  String(value || '').replace(/\D/g, '').slice(0, 15)
+
+const formatPhonePreview = (value) => {
+  const digits = normalizePhoneDigits(value)
+
+  if (!digits) return PHONE_EXAMPLE
+
+  if (digits.length <= 3) return `(${digits}`
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+  if (digits.length <= 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+
+  if (digits[0] === '1' && digits.length <= 11) {
+    const local = digits.slice(1)
+    if (local.length <= 3) return `1 (${local}`
+    if (local.length <= 6) return `1 (${local.slice(0, 3)}) ${local.slice(3)}`
+    return `1 (${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
+  }
+
+  return digits.replace(/(\d{3})(?=\d)/g, '$1 ').trim()
+}
+
 const keyboardAvoidingBehavior = Platform.OS === 'ios' ? 'padding' : 'height'
 
 const buildJobPayload = (job) => ({
   ...job,
   jobDate: formatDateValue(job.jobDate),
+  startTime: formatTimeValue(job.startTime),
   payment: job.payment === '' ? 0 : Number(job.payment)
 })
 
@@ -113,6 +198,68 @@ const toDateKey = (date) => {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const startOfDay = (value) => {
+  const date = parseDateValue(value) || new Date(value)
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
+const addDays = (value, amount) => {
+  const date = new Date(value)
+  date.setDate(date.getDate() + amount)
+  return startOfDay(date)
+}
+
+const startOfWeek = (value) => {
+  const date = startOfDay(value)
+  const offset = (date.getDay() + 6) % 7
+  return addDays(date, -offset)
+}
+
+const startOfMonth = (value) => {
+  const date = parseDateValue(value) || new Date(value)
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+const startOfYear = (value) => {
+  const date = parseDateValue(value) || new Date(value)
+  return new Date(date.getFullYear(), 0, 1)
+}
+
+const buildMonthGrid = (value) => {
+  const monthStart = startOfMonth(value)
+  const gridStart = startOfWeek(monthStart)
+  return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index))
+}
+
+const getJobTypeColors = (jobType) =>
+  JOB_TYPE_COLORS[jobType] || JOB_TYPE_COLORS[JOB_TYPE_OPTIONS[0]]
+
+const getCalendarRangeLabel = (view, anchorDate) => {
+  if (view === 'day') {
+    return formatFullDate(anchorDate)
+  }
+
+  if (view === 'week') {
+    const weekStart = startOfWeek(anchorDate)
+    const weekEnd = addDays(weekStart, 6)
+    const sameMonth = weekStart.getMonth() === weekEnd.getMonth()
+    const sameYear = weekStart.getFullYear() === weekEnd.getFullYear()
+
+    if (sameMonth && sameYear) {
+      return `${weekStart.toLocaleDateString('en-US', { month: 'long' })} ${weekStart.getDate()}-${weekEnd.getDate()}, ${weekStart.getFullYear()}`
+    }
+
+    return `${formatDate(weekStart)} - ${formatDate(weekEnd)}`
+  }
+
+  if (view === 'month') {
+    return formatMonth(anchorDate)
+  }
+
+  return String(startOfYear(anchorDate).getFullYear())
 }
 
 const buildClients = (jobs) => {
@@ -135,30 +282,11 @@ const buildClients = (jobs) => {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const buildCalendarGroups = (jobs, visibleMonth) => {
-  const year = visibleMonth.getFullYear()
-  const month = visibleMonth.getMonth()
-  const groups = new Map()
-
-  jobs.forEach((job) => {
-    const date = parseDateValue(job.job_date)
-    if (!date) return
-    if (date.getFullYear() !== year || date.getMonth() !== month) return
-    const key = toDateKey(date)
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push(job)
-  })
-
-  return Array.from(groups.entries())
-    .sort(([a], [b]) => getDateTimestamp(a) - getDateTimestamp(b))
-    .map(([date, dayJobs]) => ({ date, jobs: dayJobs }))
-}
-
 export default function App() {
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState(null)
   const [apiHealth, setApiHealth] = useState({ status: 'checking', message: 'Checking backend...' })
-  const [activeTab, setActiveTab] = useState('jobs')
+  const [activeTab, setActiveTab] = useState('calendar')
   const [jobs, setJobs] = useState([])
   const [jobsLoading, setJobsLoading] = useState(false)
   const [jobsError, setJobsError] = useState('')
@@ -173,10 +301,8 @@ export default function App() {
   const [jobErrors, setJobErrors] = useState({})
   const [jobStatus, setJobStatus] = useState(null)
   const [clientSearch, setClientSearch] = useState('')
-  const [visibleMonth, setVisibleMonth] = useState(() => {
-    const today = new Date()
-    return new Date(today.getFullYear(), today.getMonth(), 1)
-  })
+  const [calendarView, setCalendarView] = useState('day')
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => startOfDay(new Date()))
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -269,7 +395,30 @@ export default function App() {
       )
     )
   }, [clients, clientSearch])
-  const calendarGroups = useMemo(() => buildCalendarGroups(jobs, visibleMonth), [jobs, visibleMonth])
+  const jobsByDate = useMemo(() => {
+    const groupedJobs = new Map()
+
+    jobs.forEach((job) => {
+      const date = parseDateValue(job.job_date)
+      if (!date) return
+      const key = toDateKey(date)
+      if (!groupedJobs.has(key)) groupedJobs.set(key, [])
+      groupedJobs.get(key).push(job)
+    })
+
+    groupedJobs.forEach((group) => {
+      group.sort((first, second) => {
+        const firstTime = String(first.start_time || '')
+        const secondTime = String(second.start_time || '')
+        return firstTime.localeCompare(secondTime) || first.name.localeCompare(second.name)
+      })
+    })
+
+    return groupedJobs
+  }, [jobs])
+
+  const calendarToday = useMemo(() => startOfDay(new Date()), [])
+  const calendarTodayKey = toDateKey(calendarToday)
 
   const refreshJobs = async () => {
     if (!session) return
@@ -294,9 +443,11 @@ export default function App() {
       case 'address':
         return value.trim().length >= 5 ? '' : 'Enter a fuller address so the job location is clear.'
       case 'jobType':
-        return value.trim() ? '' : 'Choose or enter the type of job you are scheduling.'
+        return JOB_TYPE_OPTIONS.includes(value) ? '' : 'Choose one of the four supported job types.'
       case 'jobDate':
         return parseDateValue(value) ? '' : 'Pick a valid date for this appointment.'
+      case 'startTime':
+        return parseTimeValue(value) ? '' : 'Pick a valid start time for this appointment.'
       case 'payment':
         return !value || /^\d+(\.\d{0,2})?$/.test(value) ? '' : 'Enter a valid payment amount, for example 125 or 125.00.'
       case 'comments':
@@ -432,7 +583,7 @@ export default function App() {
         })
         if (!nextSession) throw new Error('Login succeeded but mobile session data was incomplete')
         setSession(nextSession)
-        setActiveTab('jobs')
+        setActiveTab('calendar')
       }
     } catch (error) {
       setAuthStatus({ type: 'error', message: toFriendlyAuthError(error.message, authMode) })
@@ -469,7 +620,7 @@ export default function App() {
       setJobForm(EMPTY_JOB_FORM)
       setJobStatus({ type: 'success', message: 'Job created successfully' })
       await clearJobDraft()
-      setActiveTab('jobs')
+      setActiveTab('calendar')
       await refreshJobs()
     } catch (error) {
       setJobStatus({ type: 'error', message: toFriendlyJobError(error.message) })
@@ -554,6 +705,193 @@ export default function App() {
         }
       ]
     )
+  }
+
+  const stepCalendar = (direction) => {
+    setCalendarAnchorDate((current) => {
+      if (calendarView === 'day') return addDays(current, direction)
+      if (calendarView === 'week') return addDays(current, direction * 7)
+      if (calendarView === 'month') return new Date(current.getFullYear(), current.getMonth() + direction, 1)
+      return new Date(current.getFullYear() + direction, 0, 1)
+    })
+  }
+
+  const jumpCalendarToToday = () => {
+    setCalendarAnchorDate(calendarToday)
+    setCalendarView('day')
+  }
+
+  const renderCalendarJobCard = (job, compact = false) => {
+    const palette = getJobTypeColors(job.job_type)
+
+    return (
+      <View
+        key={job.id}
+        style={[
+          styles.calendarJobCard,
+          {
+            backgroundColor: palette.background,
+            borderColor: palette.border
+          }
+        ]}
+      >
+        <View style={commonStyles.rowBetween}>
+          <Pressable style={styles.inlineContentButton} onPress={() => setSelectedJob(job)}>
+            <Text style={[styles.calendarJobTitle, { color: palette.text }]}>{job.name}</Text>
+            <Text style={[styles.calendarJobType, { color: palette.text }]}>{formatTimeRange(job.start_time)}</Text>
+            <Text style={[styles.calendarJobType, { color: palette.text }]}>{job.job_type}</Text>
+            {!compact ? (
+              <Text style={[styles.calendarJobMeta, { color: palette.text }]}>
+                {job.address || '-'} | {formatCurrency(job.payment)}
+              </Text>
+            ) : null}
+          </Pressable>
+          <Pressable style={styles.calendarEditButton} onPress={() => setSelectedJob(job)}>
+            <Text style={styles.inlineActionText}>Edit</Text>
+          </Pressable>
+        </View>
+      </View>
+    )
+  }
+
+  const renderCalendarContent = () => {
+    if (calendarView === 'day') {
+      const dayJobs = jobsByDate.get(toDateKey(calendarAnchorDate)) || []
+
+      return (
+        <>
+          <View style={styles.calendarHero}>
+            <Text style={styles.calendarHeroWeekday}>{calendarAnchorDate.toLocaleDateString('en-US', { weekday: 'short' })}</Text>
+            <Text style={styles.calendarHeroDay}>{calendarAnchorDate.getDate()}</Text>
+            <Text style={styles.calendarHeroMonth}>{calendarAnchorDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
+          </View>
+          <View style={commonStyles.panel}>
+            <Text style={commonStyles.heading3}>Appointments for the day</Text>
+            <Text style={commonStyles.text}>{dayJobs.length} scheduled job{dayJobs.length === 1 ? '' : 's'}</Text>
+            {dayJobs.length === 0 ? (
+              <View style={styles.calendarEmptyState}>
+                <Text style={commonStyles.text}>No jobs are scheduled for this day.</Text>
+              </View>
+            ) : (
+              <View style={styles.calendarAgendaList}>
+                {dayJobs.map((job) => renderCalendarJobCard(job))}
+              </View>
+            )}
+          </View>
+        </>
+      )
+    }
+
+    if (calendarView === 'week') {
+      const weekStart = startOfWeek(calendarAnchorDate)
+      const weekDays = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
+
+      return weekDays.map((date) => {
+        const dateKey = toDateKey(date)
+        const dayJobs = jobsByDate.get(dateKey) || []
+
+        return (
+          <View key={dateKey} style={[commonStyles.panel, dateKey === calendarTodayKey ? styles.calendarPanelToday : null]}>
+            <View style={styles.calendarSectionHeader}>
+              <Text style={commonStyles.heading3}>{date.toLocaleDateString('en-US', { weekday: 'long' })}</Text>
+              <View style={commonStyles.chip}>
+                <Text style={commonStyles.chipText}>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
+              </View>
+            </View>
+            {dayJobs.length === 0 ? (
+              <Text style={commonStyles.text}>No jobs</Text>
+            ) : (
+              <View style={styles.calendarAgendaList}>
+                {dayJobs.map((job) => renderCalendarJobCard(job, true))}
+              </View>
+            )}
+          </View>
+        )
+      })
+    }
+
+    if (calendarView === 'month') {
+      const monthDays = buildMonthGrid(calendarAnchorDate)
+      const currentMonth = calendarAnchorDate.getMonth()
+
+      return (
+        <View style={styles.monthGrid}>
+          {monthDays.map((date) => {
+            const dateKey = toDateKey(date)
+            const dayJobs = jobsByDate.get(dateKey) || []
+            const palette = dayJobs[0] ? getJobTypeColors(dayJobs[0].job_type) : null
+
+            return (
+              <Pressable
+                key={dateKey}
+                style={[
+                  styles.monthCell,
+                  date.getMonth() !== currentMonth ? styles.monthCellOutside : null,
+                  dateKey === calendarTodayKey ? styles.monthCellToday : null
+                ]}
+                onPress={() => {
+                  setCalendarAnchorDate(date)
+                  setCalendarView('day')
+                }}
+              >
+                <Text style={styles.monthCellDay}>{date.getDate()}</Text>
+                {dayJobs.length > 0 ? (
+                  <>
+                    <View style={[styles.monthCellDot, { backgroundColor: palette.background }]} />
+                    <Text style={styles.monthCellCount}>{dayJobs.length} job{dayJobs.length === 1 ? '' : 's'}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.monthCellCount}>Open</Text>
+                )}
+              </Pressable>
+            )
+          })}
+        </View>
+      )
+    }
+
+    const months = Array.from({ length: 12 }, (_, index) => new Date(calendarAnchorDate.getFullYear(), index, 1))
+
+    return months.map((monthDate) => {
+      const monthStart = startOfMonth(monthDate)
+      const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0)
+      const monthJobs = jobs.filter((job) => {
+        const jobDate = parseDateValue(job.job_date)
+        return jobDate && jobDate >= monthStart && jobDate <= monthEnd
+      })
+
+      return (
+        <Pressable
+          key={monthDate.toISOString()}
+          style={commonStyles.panel}
+          onPress={() => {
+            setCalendarAnchorDate(monthDate)
+            setCalendarView('month')
+          }}
+        >
+          <View style={styles.calendarSectionHeader}>
+            <Text style={commonStyles.heading3}>{monthDate.toLocaleDateString('en-US', { month: 'long' })}</Text>
+            <View style={commonStyles.chip}>
+              <Text style={commonStyles.chipText}>{monthJobs.length} jobs</Text>
+            </View>
+          </View>
+          <View style={styles.yearLegendRow}>
+            {JOB_TYPE_OPTIONS.map((jobType) => {
+              const count = monthJobs.filter((job) => job.job_type === jobType).length
+              if (count === 0) return null
+
+              return (
+                <View key={jobType} style={styles.yearLegendItem}>
+                  <View style={[styles.yearLegendDot, { backgroundColor: getJobTypeColors(jobType).background }]} />
+                  <Text style={commonStyles.text}>{jobType}: {count}</Text>
+                </View>
+              )
+            })}
+            {monthJobs.length === 0 ? <Text style={commonStyles.text}>No jobs scheduled.</Text> : null}
+          </View>
+        </Pressable>
+      )
+    })
   }
 
   const deleteClient = async (clientId) => {
@@ -719,27 +1057,32 @@ export default function App() {
                 setJobForm((current) => ({ ...current, name: value }))
                 setJobErrors((current) => ({ ...current, name: '' }))
                 setJobStatus(null)
-              }} error={jobErrors.name} />
+              }} error={jobErrors.name} placeholder="Jane Smith" />
               <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
-                setJobForm((current) => ({ ...current, phone: value.replace(/\D/g, '') }))
+                setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
                 setJobErrors((current) => ({ ...current, phone: '' }))
                 setJobStatus(null)
-              }} error={jobErrors.phone} />
+              }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
               <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, address: value }))
                 setJobErrors((current) => ({ ...current, address: '' }))
                 setJobStatus(null)
-              }} error={jobErrors.address} />
-              <FormField label="Job type" value={jobForm.jobType} onChangeText={(value) => {
+              }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
                 setJobForm((current) => ({ ...current, jobType: value }))
                 setJobErrors((current) => ({ ...current, jobType: '' }))
                 setJobStatus(null)
-              }} error={jobErrors.jobType} />
+              }} error={jobErrors.jobType} options={JOB_TYPE_OPTIONS} />
               <DateField label="Date" value={jobForm.jobDate} onChange={(value) => {
                 setJobForm((current) => ({ ...current, jobDate: value }))
                 setJobErrors((current) => ({ ...current, jobDate: '' }))
                 setJobStatus(null)
               }} error={jobErrors.jobDate} />
+              <TimeField label="Start time" value={jobForm.startTime} onChange={(value) => {
+                setJobForm((current) => ({ ...current, startTime: value }))
+                setJobErrors((current) => ({ ...current, startTime: '' }))
+                setJobStatus(null)
+              }} error={jobErrors.startTime} />
               <CurrencyField label="Payment" value={jobForm.payment} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, payment: value }))
                 setJobErrors((current) => ({ ...current, payment: '' }))
@@ -749,7 +1092,7 @@ export default function App() {
                 setJobForm((current) => ({ ...current, comments: value }))
                 setJobErrors((current) => ({ ...current, comments: '' }))
                 setJobStatus(null)
-              }} error={jobErrors.comments} multiline />
+              }} error={jobErrors.comments} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
               {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
               <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob}><Text style={commonStyles.buttonText}>Save appointment</Text></Pressable>
             </View>
@@ -804,37 +1147,37 @@ export default function App() {
             <>
               <View style={commonStyles.panel}>
                 <Text style={commonStyles.sectionTitle}>Job calendar</Text>
-                <View style={styles.calendarControls}>
-                  <Chip label="Previous" onPress={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} />
-                  <Chip label="Current" active onPress={() => { const today = new Date(); setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1)) }} />
-                  <Chip label="Next" onPress={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} />
-                </View>
-                <Text style={commonStyles.heading3}>{formatMonth(visibleMonth)}</Text>
-              </View>
-              {calendarGroups.map((group) => (
-                <View key={group.date} style={commonStyles.panel}>
-                  <Text style={commonStyles.heading3}>{formatDate(group.date)}</Text>
-                  {group.jobs.map((job) => (
-                    <View key={job.id} style={styles.inlineCard}>
-                      <View style={commonStyles.rowBetween}>
-                        <Pressable style={styles.inlineContentButton} onPress={() => setSelectedJob(job)}>
-                          <Text style={styles.inlineTitle}>{job.name}</Text>
-                          <Text style={commonStyles.text}>{job.job_type} - {formatCurrency(job.payment)}</Text>
-                        </Pressable>
-                        <View style={styles.cardActionRow}>
-                          <View style={styles.statusActionChip}><Text style={commonStyles.chipText}>{job.status}</Text></View>
-                          <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => setSelectedJob(job)}>
-                            <Text style={styles.inlineActionText}>Edit</Text>
-                          </Pressable>
-                          <Pressable style={styles.iconDeleteButton} onPress={() => confirmDeleteJob(job)}>
-                            <Text style={styles.iconDeleteText}>X</Text>
-                          </Pressable>
-                        </View>
-                      </View>
+                <Text style={commonStyles.text}>Switch between daily, weekly, monthly, and yearly views. Mobile opens on the daily schedule.</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  <View style={styles.calendarViewTabs}>
+                    {CALENDAR_VIEWS.map((view) => (
+                      <Tab
+                        key={view.key}
+                        label={view.label}
+                        active={calendarView === view.key}
+                        onPress={() => setCalendarView(view.key)}
+                      />
+                    ))}
+                  </View>
+                </ScrollView>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  <View style={styles.calendarControls}>
+                    <Chip label="Previous" onPress={() => stepCalendar(-1)} />
+                    <Chip label="Today" active onPress={jumpCalendarToToday} />
+                    <Chip label="Next" onPress={() => stepCalendar(1)} />
+                  </View>
+                </ScrollView>
+                <Text style={commonStyles.heading3}>{getCalendarRangeLabel(calendarView, calendarAnchorDate)}</Text>
+                <View style={styles.calendarLegend}>
+                  {JOB_TYPE_OPTIONS.map((jobType) => (
+                    <View key={jobType} style={styles.calendarLegendItem}>
+                      <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType).background }]} />
+                      <Text style={styles.calendarLegendText}>{jobType}</Text>
                     </View>
                   ))}
                 </View>
-              ))}
+              </View>
+              {renderCalendarContent()}
             </>
           ) : null}
         </ScrollView>
@@ -855,11 +1198,12 @@ function Panel({ title, subtitle, children }) {
   )
 }
 
-function FormField({ label, error, multiline, ...props }) {
+function FormField({ label, error, helperText, multiline, ...props }) {
   return (
     <View>
       <Text style={commonStyles.label}>{label}</Text>
       <TextInput style={[commonStyles.input, multiline ? styles.multiline : null]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
+      {helperText ? <Text style={commonStyles.helperText}>{helperText}</Text> : null}
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
     </View>
   )
@@ -974,7 +1318,7 @@ function SelectField({ label, value, onChange, error, options }) {
       <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.dateModalPanel}>
-            <Text style={commonStyles.sectionTitle}>Choose a status</Text>
+            <Text style={commonStyles.sectionTitle}>Choose {label.toLowerCase()}</Text>
             <View style={styles.optionList}>
               {options.map((option) => (
                 <Pressable
@@ -1000,14 +1344,96 @@ function SelectField({ label, value, onChange, error, options }) {
 }
 
 function Tab({ active, label, onPress }) {
-  return <Chip label={label} active={active} onPress={onPress} grow />
+  return <Chip label={label} active={active} onPress={onPress} />
 }
 
 function Chip({ active, label, onPress, grow }) {
   return (
     <Pressable style={[styles.chip, active ? styles.chipActive : null, grow ? styles.chipGrow : null]} onPress={onPress}>
-      <Text style={styles.chipText}>{label}</Text>
+      <Text style={styles.chipText} numberOfLines={1} ellipsizeMode="tail">
+        {label}
+      </Text>
     </Pressable>
+  )
+}
+
+function TimeField({ label, value, onChange, error }) {
+  const [iosPickerVisible, setIosPickerVisible] = useState(false)
+  const parsedValue = parseTimeValue(value)
+  const [iosDraftTime, setIosDraftTime] = useState(() => new Date(2000, 0, 1, parsedValue?.hours ?? 9, parsedValue?.minutes ?? 0))
+
+  useEffect(() => {
+    if (!iosPickerVisible) {
+      const nextParsedValue = parseTimeValue(value)
+      setIosDraftTime(new Date(2000, 0, 1, nextParsedValue?.hours ?? 9, nextParsedValue?.minutes ?? 0))
+    }
+  }, [iosPickerVisible, value])
+
+  const openPicker = () => {
+    const nextParsedValue = parseTimeValue(value)
+    const selectedTime = new Date(2000, 0, 1, nextParsedValue?.hours ?? 9, nextParsedValue?.minutes ?? 0)
+
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: selectedTime,
+        mode: 'time',
+        is24Hour: false,
+        onChange: (event, nextDate) => {
+          if (event.type === 'set' && nextDate) {
+            onChange(`${String(nextDate.getHours()).padStart(2, '0')}:${String(nextDate.getMinutes()).padStart(2, '0')}`)
+          }
+        }
+      })
+      return
+    }
+
+    setIosDraftTime(selectedTime)
+    setIosPickerVisible(true)
+  }
+
+  const confirmIosTime = () => {
+    onChange(`${String(iosDraftTime.getHours()).padStart(2, '0')}:${String(iosDraftTime.getMinutes()).padStart(2, '0')}`)
+    setIosPickerVisible(false)
+  }
+
+  return (
+    <View>
+      <Text style={commonStyles.label}>{label}</Text>
+      <Pressable style={[commonStyles.input, styles.dateField]} onPress={openPicker}>
+        <Text style={value ? styles.dateFieldText : styles.dateFieldPlaceholder}>
+          {value ? formatTimeRange(value) : 'Select a start time'}
+        </Text>
+        <Text style={styles.dateFieldHint}>{value || 'HH:MM'}</Text>
+      </Pressable>
+      <Text style={commonStyles.helperText}>Each job reserves one hour starting at this time.</Text>
+      {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
+
+      {Platform.OS === 'ios' && iosPickerVisible ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setIosPickerVisible(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.dateModalPanel}>
+              <Text style={commonStyles.sectionTitle}>Choose a start time</Text>
+              <DateTimePicker
+                value={iosDraftTime}
+                mode="time"
+                display="spinner"
+                onChange={(_, nextDate) => {
+                  if (nextDate) setIosDraftTime(nextDate)
+                }}
+              />
+              <View style={styles.modalActions}>
+                <Pressable style={[commonStyles.button, commonStyles.buttonSecondary, styles.modalAction]} onPress={() => setIosPickerVisible(false)}>
+                  <Text style={commonStyles.buttonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary, styles.modalAction]} onPress={confirmIosTime}>
+                  <Text style={commonStyles.buttonText}>Use time</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+    </View>
   )
 }
 
@@ -1032,6 +1458,7 @@ function JobCard({ job, onPress, onDelete }) {
       </View>
       <Pressable style={styles.jobCardContent} onPress={onPress}>
         <Text style={commonStyles.text}>{formatDate(job.job_date)}</Text>
+        <Text style={commonStyles.text}>{formatTimeRange(job.start_time)}</Text>
         <Text style={commonStyles.text}>{job.job_type}</Text>
         <Text style={commonStyles.text}>{job.phone || '-'}</Text>
         <Text style={commonStyles.text}>{job.address || '-'}</Text>
@@ -1092,9 +1519,9 @@ function ClientModal({ client, onClose, onSave }) {
             >
               <Text style={commonStyles.sectionTitle}>Edit client</Text>
               <Text style={commonStyles.text}>Update the client details used across this client&apos;s jobs.</Text>
-              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} />
-              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: value.replace(/\D/g, '') }))} />
-              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} />
+              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} placeholder="Jane Smith" />
+              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: normalizePhoneDigits(value) }))} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(formState?.phone || '')}`} />
+              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
               {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
               <View style={styles.modalActions}>
                 <Pressable style={[commonStyles.button, commonStyles.buttonSecondary, styles.modalAction]} onPress={onClose}>
@@ -1131,6 +1558,7 @@ function JobModal({ job, onClose, onSave, onDelete }) {
       address: job.address || '',
       jobType: job.job_type || '',
       jobDate: formatDateValue(job.job_date),
+      startTime: formatTimeValue(job.start_time),
       payment: job.payment === null || job.payment === undefined ? '' : String(job.payment),
       comments: job.comments || '',
       status: job.status || 'Pending'
@@ -1166,14 +1594,15 @@ function JobModal({ job, onClose, onSave, onDelete }) {
             >
               <Text style={commonStyles.sectionTitle}>Edit job</Text>
               <Text style={commonStyles.text}>Update client details, status, payment, and notes from this mobile sheet.</Text>
-              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} />
-              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: value.replace(/\D/g, '') }))} />
-              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} />
-              <FormField label="Job type" value={formState?.jobType || ''} onChangeText={(value) => setFormState((current) => ({ ...current, jobType: value }))} />
+              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} placeholder="Jane Smith" />
+              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: normalizePhoneDigits(value) }))} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(formState?.phone || '')}`} />
+              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <SelectField label="Job type" value={formState?.jobType || ''} onChange={(value) => setFormState((current) => ({ ...current, jobType: value }))} options={JOB_TYPE_OPTIONS} />
               <DateField label="Date" value={formState?.jobDate || ''} onChange={(value) => setFormState((current) => ({ ...current, jobDate: value }))} />
+              <TimeField label="Start time" value={formState?.startTime || ''} onChange={(value) => setFormState((current) => ({ ...current, startTime: value }))} />
               <SelectField label="Status" value={formState?.status || ''} onChange={(value) => setFormState((current) => ({ ...current, status: value }))} options={JOB_STATUS_OPTIONS} />
               <CurrencyField label="Payment" value={formState?.payment || ''} onChangeText={(value) => setFormState((current) => ({ ...current, payment: value }))} placeholder="0.00" />
-              <FormField label="Comments" value={formState?.comments || ''} onChangeText={(value) => setFormState((current) => ({ ...current, comments: value }))} multiline />
+              <FormField label="Comments" value={formState?.comments || ''} onChangeText={(value) => setFormState((current) => ({ ...current, comments: value }))} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
               {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
               <View style={styles.modalActions}>
                 <Pressable style={[commonStyles.button, commonStyles.buttonSecondary, styles.modalAction]} onPress={onClose}>
@@ -1187,7 +1616,7 @@ function JobModal({ job, onClose, onSave, onDelete }) {
                 <Text style={commonStyles.buttonText}>Delete job</Text>
               </Pressable>
               <View style={commonStyles.chip}>
-                <Text style={commonStyles.chipText}>Original date {formatDate(job.job_date)}</Text>
+                <Text style={commonStyles.chipText}>Original slot {formatDate(job.job_date)} | {formatTimeRange(job.start_time)}</Text>
               </View>
             </ScrollView>
           </View>
@@ -1201,9 +1630,10 @@ const styles = StyleSheet.create({
   keyboardFrame: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   tabs: { flexDirection: 'row', gap: 8 },
-  navRow: { flexDirection: 'row', gap: 10 },
+  navRow: { flexDirection: 'row', gap: 10, paddingRight: 8 },
   chip: {
     minHeight: 44,
+    minWidth: 88,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
@@ -1211,11 +1641,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
-    borderColor: colors.border
+    borderColor: colors.border,
+    flexShrink: 0
   },
   chipActive: { backgroundColor: 'rgba(109, 124, 255, 0.18)', borderColor: colors.borderStrong },
   chipGrow: { flex: 1 },
-  chipText: { color: colors.heading, fontWeight: '700' },
+  chipText: { color: colors.heading, fontWeight: '700', fontSize: 13 },
   currencyField: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1335,7 +1766,111 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 120 },
   inlineCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, backgroundColor: colors.card, padding: 14, gap: 6 },
   inlineTitle: { color: colors.heading, fontWeight: '700', fontSize: 16 },
-  calendarControls: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  calendarViewTabs: { flexDirection: 'row', gap: 10, paddingRight: 8 },
+  calendarControls: { flexDirection: 'row', gap: 10, paddingRight: 8 },
+  calendarLegend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  calendarLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '48%',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    flexShrink: 0
+  },
+  calendarLegendSwatch: { width: 10, height: 10, borderRadius: 999 },
+  calendarLegendText: { color: colors.heading, fontSize: 11, fontWeight: '700', flexShrink: 1 },
+  calendarHero: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 24,
+    backgroundColor: colors.panel,
+    padding: 22,
+    alignItems: 'center',
+    gap: 8
+  },
+  calendarHeroWeekday: { color: colors.textMuted, fontSize: 13, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  calendarHeroDay: { color: colors.heading, fontSize: 68, fontWeight: '800', lineHeight: 72 },
+  calendarHeroMonth: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  calendarEmptyState: {
+    marginTop: 12,
+    minHeight: 120,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16
+  },
+  calendarAgendaList: { gap: 12, marginTop: 12 },
+  calendarJobCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    gap: 8
+  },
+  calendarJobTitle: { fontSize: 16, fontWeight: '800' },
+  calendarJobType: { fontSize: 13, fontWeight: '700' },
+  calendarJobMeta: { fontSize: 12, lineHeight: 18 },
+  calendarEditButton: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)'
+  },
+  calendarSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12
+  },
+  calendarPanelToday: {
+    borderColor: colors.borderStrong
+  },
+  monthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  monthCell: {
+    width: '22%',
+    minWidth: 70,
+    flexGrow: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.panel,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    gap: 8
+  },
+  monthCellOutside: {
+    opacity: 0.45
+  },
+  monthCellToday: {
+    borderColor: colors.borderStrong,
+    backgroundColor: 'rgba(109, 124, 255, 0.12)'
+  },
+  monthCellDay: { color: colors.heading, fontSize: 18, fontWeight: '800' },
+  monthCellDot: { width: 10, height: 10, borderRadius: 999 },
+  monthCellCount: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  yearLegendRow: { gap: 10 },
+  yearLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  yearLegendDot: { width: 10, height: 10, borderRadius: 999 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(2, 6, 23, 0.8)' },
   modalPanel: { maxHeight: '85%', backgroundColor: colors.panel, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: colors.border },
   modalContent: { padding: 20, gap: 14 },

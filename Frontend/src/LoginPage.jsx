@@ -110,7 +110,7 @@ export default function LoginPage({ onLogin }) {
           user: userPayload,
           accessToken: payload.accessToken
         })
-        navigate('/jobs')
+        navigate('/calendar')
       }
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Unable to reach the server' })

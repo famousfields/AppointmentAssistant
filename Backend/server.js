@@ -14,6 +14,8 @@ const {
 const { body, validationResult } = require("express-validator");
 
 const app = express();
+const JOB_TYPE_OPTIONS = ["0 Turn Mower", "Push Mower", "Riding Mower", "Pressure Washer"];
+const START_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const ACCESS_TOKEN_TTL_MS = Number.parseInt(process.env.ACCESS_TOKEN_TTL_MS || `${15 * 60 * 1000}`, 10);
 const REFRESH_TOKEN_TTL_DAYS = Number.parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || "14", 10);
@@ -358,7 +360,10 @@ app.post(
       return true;
     }),
     body("address").trim().isLength({ min: 5 }).withMessage("Address must be at least 5 characters"),
-    body("jobType").trim().notEmpty().withMessage("Job type is required"),
+    body("jobType")
+      .trim()
+      .isIn(JOB_TYPE_OPTIONS)
+      .withMessage(`Job type must be one of: ${JOB_TYPE_OPTIONS.join(", ")}`),
     body("jobDate")
       .isISO8601()
       .withMessage("Invalid date")
@@ -367,6 +372,9 @@ app.post(
         if (Number.isNaN(date.getTime())) throw new Error("Invalid date");
         return true;
       }),
+    body("startTime")
+      .matches(START_TIME_PATTERN)
+      .withMessage("Start time must use HH:MM in 24-hour format"),
     body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars"),
     body("payment")
       .optional({ values: "falsy" })
@@ -377,8 +385,9 @@ app.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { name, phone, address, jobType, jobDate, comments, payment } = req.body;
+    const { name, phone, address, jobType, jobDate, startTime, comments, payment } = req.body;
     const normalizedPayment = Number.parseFloat(payment ?? 0);
+    const normalizedStartTime = `${startTime}:00`;
     const userId = req.user.id;
 
     const getClientQuery = `
@@ -413,12 +422,12 @@ app.post(
 
       function insertJob(clientId) {
         const jobQuery = `
-        INSERT INTO Jobs (client_id, job_type, job_date, comments, status, payment, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Jobs (client_id, job_type, job_date, start_time, comments, status, payment, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
         db.query(
           jobQuery,
-          [clientId, jobType, jobDate, comments, "Pending", normalizedPayment, userId],
+          [clientId, jobType, jobDate, normalizedStartTime, comments, "Pending", normalizedPayment, userId],
           (insertJobErr, result) => {
             if (insertJobErr) {
               console.error("Error inserting job:", insertJobErr);
@@ -435,12 +444,12 @@ app.post(
 
 app.get("/jobs", requireAuth, (req, res) => {
   const query = `
-    SELECT j.id, j.job_type, j.job_date, j.comments, j.status, j.payment,
+    SELECT j.id, j.job_type, j.job_date, j.start_time, j.comments, j.status, j.payment,
            c.id AS client_id, c.name, c.phone, c.address
     FROM Jobs j
     JOIN Clients c ON j.client_id = c.id
     WHERE j.user_id = ?
-    ORDER BY j.job_date DESC
+    ORDER BY j.job_date DESC, j.start_time ASC
     `;
 
   db.query(query, [req.user.id], (err, results) => {
@@ -492,7 +501,11 @@ app.put(
         return true;
       }),
     body("address").optional().trim().isLength({ min: 5 }).withMessage("Address must be at least 5 characters"),
-    body("jobType").optional().trim().notEmpty().withMessage("Job type is required"),
+    body("jobType")
+      .optional()
+      .trim()
+      .isIn(JOB_TYPE_OPTIONS)
+      .withMessage(`Job type must be one of: ${JOB_TYPE_OPTIONS.join(", ")}`),
     body("jobDate")
       .optional()
       .isISO8601()
@@ -502,6 +515,10 @@ app.put(
         if (Number.isNaN(date.getTime())) throw new Error("Invalid date");
         return true;
       }),
+    body("startTime")
+      .optional()
+      .matches(START_TIME_PATTERN)
+      .withMessage("Start time must use HH:MM in 24-hour format"),
     body("comments").optional().isLength({ max: 500 }).withMessage("Comments max 500 chars"),
     body("status")
       .optional()
@@ -521,7 +538,7 @@ app.put(
       return res.status(400).json({ error: "Invalid job ID" });
     }
 
-    const { name, phone, address, jobType, jobDate, comments, status, payment } = req.body;
+    const { name, phone, address, jobType, jobDate, startTime, comments, status, payment } = req.body;
     const jobUpdates = [];
     const jobValues = [];
     const clientUpdates = [];
@@ -550,6 +567,11 @@ app.put(
     if (jobDate !== undefined) {
       jobUpdates.push("job_date = ?");
       jobValues.push(jobDate);
+    }
+
+    if (startTime !== undefined) {
+      jobUpdates.push("start_time = ?");
+      jobValues.push(`${startTime}:00`);
     }
 
     if (comments !== undefined) {

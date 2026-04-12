@@ -124,6 +124,11 @@ export const commonStyles = StyleSheet.create({
     color: colors.error,
     fontSize: 14
   },
+  helperText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 6
+  },
   successText: {
     color: colors.success,
     fontSize: 14

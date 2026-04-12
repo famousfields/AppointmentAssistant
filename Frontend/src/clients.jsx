@@ -14,6 +14,25 @@ const formatDate = (dateString) => {
   })
 }
 
+const formatTimeRange = (timeValue) => {
+  if (!timeValue) return '-'
+  const [hoursText = '0', minutesText = '00'] = String(timeValue).split(':')
+  const hours = Number(hoursText)
+  const minutes = Number(minutesText)
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return '-'
+
+  const start = new Date(2000, 0, 1, hours, minutes)
+  const end = new Date(2000, 0, 1, hours + 1, minutes)
+
+  return `${start.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })} - ${end.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`
+}
+
 const formatCurrency = (value) =>
   new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -159,6 +178,7 @@ export default function ClientsList({ currentUser }) {
         address: updates.address,
         job_type: updates.jobType,
         job_date: updates.jobDate,
+        start_time: updates.startTime,
         status: updates.status,
         payment: updates.payment,
         comments: updates.comments
@@ -278,6 +298,7 @@ export default function ClientsList({ currentUser }) {
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Time</th>
                   <th>Job Type</th>
                   <th>Status</th>
                   <th>Payment</th>
@@ -289,6 +310,7 @@ export default function ClientsList({ currentUser }) {
                 {selectedClient.jobs.map((job) => (
                   <tr key={job.id}>
                     <td>{formatDate(job.job_date)}</td>
+                    <td>{formatTimeRange(job.start_time)}</td>
                     <td>{job.job_type}</td>
                     <td>{job.status}</td>
                     <td>{formatCurrency(job.payment)}</td>
