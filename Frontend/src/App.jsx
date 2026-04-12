@@ -12,10 +12,10 @@ import { ApiContext } from './apiContext'
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 
 const NAV_ITEMS = [
+  { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
   { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
   { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
-  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' },
-  { label: 'Calendar', path: '/calendar', description: 'View your jobs across the month.' }
+  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' }
 ]
 
 const PAGE_META = {
@@ -33,7 +33,7 @@ const PAGE_META = {
   },
   '/calendar': {
     title: 'Calendar overview',
-    description: 'See every scheduled job on a month-by-month calendar.'
+    description: 'See every scheduled job in daily, weekly, monthly, and yearly calendar views.'
   }
 }
 
@@ -132,7 +132,7 @@ function AppContent() {
       }
     }
 
-    return PAGE_META[location.pathname] || PAGE_META['/jobs']
+    return PAGE_META[location.pathname] || PAGE_META['/calendar']
   }, [isLogin, location.pathname])
 
   useEffect(() => {

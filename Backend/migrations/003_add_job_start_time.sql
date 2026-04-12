@@ -1,0 +1,2 @@
+ALTER TABLE Jobs
+ADD COLUMN start_time TIME NULL AFTER job_date

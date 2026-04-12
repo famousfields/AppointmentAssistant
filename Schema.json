@@ -12,7 +12,7 @@
     "job_type": "string",
     "address": "string",
     "date": "string",
-    "time": "string",
+    "start_time": "string",
     "status": "string",
     "payment": "number",
     "notes": "string"
