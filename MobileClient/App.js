@@ -1807,6 +1807,9 @@ const styles = StyleSheet.create({
   borderBottomColor: '#e5e7eb',
   backgroundColor: '#fff',
 },
+suggestionItemPressed: {
+  backgroundColor: '#e5e7eb',
+},
   inlineActionText: {
     color: colors.heading,
     fontSize: 12,
