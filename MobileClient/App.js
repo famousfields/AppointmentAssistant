@@ -282,6 +282,8 @@ const buildClients = (jobs) => {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+
+
 export default function App() {
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState(null)
@@ -292,6 +294,8 @@ export default function App() {
   const [jobsError, setJobsError] = useState('')
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedClient, setSelectedClient] = useState(null)
+  const [clientMatches, setClientMatches] = useState([]);
+  const [showMatches, setShowMatches] = useState(false);
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', confirmPassword: '' })
   const [authErrors, setAuthErrors] = useState({})
@@ -386,6 +390,7 @@ export default function App() {
   }, [session])
 
   const clients = useMemo(() => buildClients(jobs), [jobs])
+
   const filteredClients = useMemo(() => {
     const query = clientSearch.trim().toLowerCase()
     if (!query) return clients
@@ -395,6 +400,36 @@ export default function App() {
       )
     )
   }, [clients, clientSearch])
+  
+ 
+const searchClients = (query, field) => {
+  const value = query.trim().toLowerCase();
+
+  if (!value) {
+    setClientMatches([]);
+    setShowMatches(false);
+    return;
+  }
+
+  const matches = clients.filter((client) =>
+    (client[field] || '').toLowerCase().includes(value)
+  );
+
+  setClientMatches(matches);
+  setShowMatches(matches.length > 0);
+};
+
+const selectClient = (client) => {
+  setJobForm((current) => ({
+    ...current,
+    name: client.name || '',
+    phone: client.phone || '',
+    address: client.address || '',
+  }));
+
+  setShowMatches(false);
+};
+
   const jobsByDate = useMemo(() => {
     const groupedJobs = new Map()
 
@@ -1057,16 +1092,34 @@ export default function App() {
                 setJobForm((current) => ({ ...current, name: value }))
                 setJobErrors((current) => ({ ...current, name: '' }))
                 setJobStatus(null)
+                searchClients(value, 'name')
               }} error={jobErrors.name} placeholder="Jane Smith" />
+              {showMatches && (
+                <View style={styles.suggestionBox}>
+                  {clientMatches.map((client, index) => (
+                    <Pressable
+                      key={index}
+                      onPress={() => selectClient(client)}
+                      style={styles.suggestionItem}
+                    >
+                      <Text>{client.name}</Text>
+                      <Text>{formatPhonePreview(client.phone)}</Text>
+                      <Text>{client.address}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
               <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
                 setJobErrors((current) => ({ ...current, phone: '' }))
                 setJobStatus(null)
+                searchClients(value, 'phone')
               }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
               <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, address: value }))
                 setJobErrors((current) => ({ ...current, address: '' }))
                 setJobStatus(null)
+                searchClients(value, 'address')
               }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
               <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
                 setJobForm((current) => ({ ...current, jobType: value }))
@@ -1739,6 +1792,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderStrong
   },
+  suggestionBox: {
+  backgroundColor: '#fff',
+  borderWidth: 1,
+  borderColor: '#ddd',
+  borderRadius: 8,
+  marginTop: 4,
+  zIndex: 999,
+  },
+  suggestionItem: {
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  borderBottomWidth: 1,
+  borderBottomColor: '#e5e7eb',
+  backgroundColor: '#fff',
+},
+suggestionItemPressed: {
+  backgroundColor: '#e5e7eb',
+},
   inlineActionText: {
     color: colors.heading,
     fontSize: 12,
@@ -1791,7 +1862,7 @@ const styles = StyleSheet.create({
   calendarHero: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 24,
+    borderRadius: 12,
     backgroundColor: colors.panel,
     padding: 22,
     alignItems: 'center',
