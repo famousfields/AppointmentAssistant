@@ -16,6 +16,7 @@ export default function JobsList({ currentUser }) {
   const [savingPayments, setSavingPayments] = useState({})
   const [editingJob, setEditingJob] = useState(null)
   const [isSavingJob, setIsSavingJob] = useState(false)
+  const [isDeletingJob, setIsDeletingJob] = useState(false)
   const [editError, setEditError] = useState('')
   const { fetchWithAuth } = useApi()
 
@@ -206,6 +207,12 @@ export default function JobsList({ currentUser }) {
     )
   }
 
+  const removeJob = (jobId) => {
+    setJobs((prev) => prev.filter((job) => job.id !== jobId))
+    setSelectedJob((current) => (current?.id === jobId ? null : current))
+    setEditingJob((current) => (current?.id === jobId ? null : current))
+  }
+
   const saveComments = async () => {
     if (!selectedJob) return
     setIsSavingComments(true)
@@ -276,6 +283,42 @@ export default function JobsList({ currentUser }) {
       setEditError(err.message || 'Unable to update job')
     } finally {
       setIsSavingJob(false)
+    }
+  }
+
+  const deleteJob = async (job) => {
+    if (!job) return
+
+    const confirmed = window.confirm(
+      `Delete the ${job.job_type} job for ${job.name}? This cannot be undone.`
+    )
+    if (!confirmed) return
+
+    setIsDeletingJob(true)
+    setEditError('')
+    setModalError('')
+
+    try {
+      const res = await fetchWithAuth(`/jobs/${job.id}`, {
+        method: 'DELETE'
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to delete job')
+      }
+
+      removeJob(job.id)
+    } catch (err) {
+      console.error('Error deleting job:', err)
+      const message = err.message || 'Unable to delete job'
+      if (editingJob?.id === job.id) {
+        setEditError(message)
+      } else {
+        setModalError(message)
+      }
+    } finally {
+      setIsDeletingJob(false)
     }
   }
 
@@ -397,13 +440,23 @@ export default function JobsList({ currentUser }) {
                     </div>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="comments-button"
-                      onClick={() => openEditModal(job)}
-                    >
-                      Edit job
-                    </button>
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="comments-button"
+                        onClick={() => openEditModal(job)}
+                      >
+                        Edit job
+                      </button>
+                      <button
+                        type="button"
+                        className="comments-button comments-button--danger"
+                        onClick={() => deleteJob(job)}
+                        disabled={isDeletingJob}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -454,9 +507,11 @@ export default function JobsList({ currentUser }) {
         job={editingJob}
         clients={clients}
         saving={isSavingJob}
+        deleting={isDeletingJob}
         error={editError}
         onClose={closeEditModal}
         onSave={saveJobEdits}
+        onDelete={deleteJob}
       />
     </div>
   )

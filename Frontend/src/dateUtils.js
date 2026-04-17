@@ -1,11 +1,19 @@
 export const parseDateValue = (value) => {
   if (!value) return null
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null
+
+    return new Date(
+      value.getFullYear(),
+      value.getMonth(),
+      value.getDate()
+    )
+  }
 
   if (typeof value === 'string') {
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
-    if (match) {
-      const [, year, month, day] = match
+    const datePartMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (datePartMatch) {
+      const [, year, month, day] = datePartMatch
       const date = new Date(Number(year), Number(month) - 1, Number(day))
       const isValid =
         date.getFullYear() === Number(year) &&
