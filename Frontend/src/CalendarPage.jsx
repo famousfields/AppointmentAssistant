@@ -660,7 +660,7 @@ export default function CalendarPage({ currentUser }) {
                             44
                           )
                           const topAdjustment =
-                            startMinutes === timelineStartMinutes ? 0 : DAY_TIMELINE_EVENT_HEIGHT_REDUCTION
+                            startMinutes === timelineStartMinutes ? 0 : DAY_TIMELINE_EVENT_HEIGHT_REDUCTION / 2
                           const columnWidth = 100 / columnCount
                           const leftOffset = columnIndex * columnWidth
 

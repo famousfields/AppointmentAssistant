@@ -811,10 +811,11 @@
   justify-content: flex-start;
   overflow: hidden;
   z-index: 1;
+  min-height: 40px;
 }
 
 .calendar-job-pill--timeline .calendar-job-pill-main {
-  padding: 12px 12px 10px;
+  padding: 14px 12px 12px;
 }
 
 .calendar-job-pill--timeline .calendar-job-pill-title,
