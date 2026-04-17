@@ -1,6 +1,8 @@
 import { useApi } from './apiContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
+import { buildClients } from './clientUtils'
+import { formatDisplayDate } from './dateUtils'
 
 export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
@@ -115,15 +117,13 @@ export default function JobsList({ currentUser }) {
     await handlePaymentSave(jobId, event.currentTarget.value)
   }
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', {
+  const formatDate = (dateString) =>
+    formatDisplayDate(dateString, {
       weekday: 'short',
       year: 'numeric',
       month: 'short',
       day: 'numeric'
     })
-  }
 
   const formatTimeRange = (timeValue) => {
     if (!timeValue) return '-'
@@ -162,6 +162,7 @@ export default function JobsList({ currentUser }) {
       jobs.reduce((sum, job) => sum + (Number.parseFloat(job.payment) || 0), 0),
     [jobs]
   )
+  const clients = useMemo(() => buildClients(jobs), [jobs])
 
   const openCommentsModal = (job) => {
     setSelectedJob(job)
@@ -451,6 +452,7 @@ export default function JobsList({ currentUser }) {
       <JobEditorModal
         key={editingJob?.id || 'jobs-editor'}
         job={editingJob}
+        clients={clients}
         saving={isSavingJob}
         error={editError}
         onClose={closeEditModal}

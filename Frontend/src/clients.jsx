@@ -1,18 +1,16 @@
 import { useApi } from './apiContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
+import { buildClients } from './clientUtils'
+import { formatDisplayDate } from './dateUtils'
 
-const formatDate = (dateString) => {
-  if (!dateString) return '-'
-  const date = new Date(dateString)
-  if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleDateString('en-US', {
+const formatDate = (dateString) =>
+  formatDisplayDate(dateString, {
     weekday: 'short',
     year: 'numeric',
     month: 'short',
     day: 'numeric'
   })
-}
 
 const formatTimeRange = (timeValue) => {
   if (!timeValue) return '-'
@@ -38,37 +36,6 @@ const formatCurrency = (value) =>
     style: 'currency',
     currency: 'USD'
   }).format(Number(value) || 0)
-
-const buildClients = (jobs) => {
-  const map = new Map()
-
-  jobs.forEach((job) => {
-    const clientId = job.client_id ?? `${job.name}|${job.phone}|${job.address}`
-    if (!map.has(clientId)) {
-      map.set(clientId, {
-        id: clientId,
-        name: job.name,
-        phone: job.phone,
-        address: job.address,
-        jobs: []
-      })
-    }
-    map.get(clientId).jobs.push(job)
-  })
-
-  return Array.from(map.values())
-    .map((client) => {
-      const sortedJobs = [...client.jobs].sort(
-        (a, b) => new Date(b.job_date) - new Date(a.job_date)
-      )
-      const totalPayments = sortedJobs.reduce(
-        (sum, job) => sum + (Number.parseFloat(job.payment) || 0),
-        0
-      )
-      return { ...client, jobs: sortedJobs, totalPayments }
-    })
-    .sort((a, b) => a.name.localeCompare(b.name))
-}
 
 export default function ClientsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
@@ -338,6 +305,7 @@ export default function ClientsList({ currentUser }) {
       <JobEditorModal
         key={editingJob?.id || 'clients-editor'}
         job={editingJob}
+        clients={clients}
         saving={isSavingJob}
         error={editError}
         onClose={closeEditModal}

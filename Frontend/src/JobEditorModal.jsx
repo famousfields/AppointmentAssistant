@@ -1,43 +1,28 @@
 import { useState } from 'react'
+import ClientSuggestions from './ClientSuggestions'
+import { applyClientSuggestion, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
+import { formatDateInputValue, parseDateValue } from './dateUtils'
 import { JOB_TYPE_OPTIONS } from './jobTypes'
 
 const STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
 const PHONE_EXAMPLE = '(555) 123-4567'
 
-const formatPhonePreview = (value) => {
-  const digits = String(value || '').replace(/\D/g, '').slice(0, 15)
-
-  if (!digits) return PHONE_EXAMPLE
-
-  if (digits.length <= 3) return `(${digits}`
-  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
-  if (digits.length <= 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
-
-  if (digits[0] === '1' && digits.length <= 11) {
-    const local = digits.slice(1)
-    if (local.length <= 3) return `1 (${local}`
-    if (local.length <= 6) return `1 (${local.slice(0, 3)}) ${local.slice(3)}`
-    return `1 (${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
-  }
-
-  return digits.replace(/(\d{3})(?=\d)/g, '$1 ').trim()
-}
-
 const buildFormState = (job) => ({
   name: job?.name || '',
-  phone: job?.phone || '',
+  phone: normalizePhoneDigits(job?.phone || ''),
   address: job?.address || '',
   jobType: job?.job_type || '',
-  jobDate: job?.job_date ? String(job.job_date).slice(0, 10) : '',
+  jobDate: formatDateInputValue(job?.job_date),
   startTime: job?.start_time ? String(job.start_time).slice(0, 5) : '',
   status: job?.status || 'Pending',
   payment: job?.payment === null || job?.payment === undefined ? '' : String(job.payment),
   comments: job?.comments || ''
 })
 
-export default function JobEditorModal({ job, saving, error, onClose, onSave }) {
+export default function JobEditorModal({ job, clients = [], saving, error, onClose, onSave }) {
   const [formData, setFormData] = useState(() => buildFormState(job))
   const [fieldErrors, setFieldErrors] = useState({})
+  const [suggestionField, setSuggestionField] = useState(null)
 
   if (!job) return null
 
@@ -54,7 +39,7 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
       case 'jobType':
         return value.trim() ? '' : 'Job type is required'
       case 'jobDate':
-        return value ? '' : 'Date is required'
+        return parseDateValue(value) ? '' : 'Date is required'
       case 'startTime':
         if (!value) return 'Start time is required'
         return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value) ? '' : 'Use HH:MM in 24-hour time'
@@ -72,7 +57,7 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
   const handleChange = (event) => {
     let { name, value } = event.target
     if (name === 'phone') {
-      value = value.replace(/\D/g, '').slice(0, 15)
+      value = normalizePhoneDigits(value)
     }
 
     setFormData((prev) => ({ ...prev, [name]: value }))
@@ -117,11 +102,32 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
         </div>
 
         <form className="job-editor-form" onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="edit-name">Client name</label>
-            <input id="edit-name" name="name" value={formData.name} onChange={handleChange} placeholder="Jane Smith" />
+              <div className="form-group">
+                <label htmlFor="edit-name">Client name</label>
+            <input
+              id="edit-name"
+              name="name"
+              value={formData.name}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField('name')
+              }}
+              placeholder="Jane Smith"
+              autoComplete="name"
+            />
             {fieldErrors.name && <p className="form-error">{fieldErrors.name}</p>}
           </div>
+          <ClientSuggestions
+            clients={clients}
+            query={formData.name}
+            field="name"
+            visible={suggestionField === 'name'}
+            onSelect={(client) => {
+              setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
+              setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
+              setSuggestionField(null)
+            }}
+          />
 
           <div className="form-group">
             <label htmlFor="edit-phone">Phone</label>
@@ -134,18 +140,53 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
               placeholder={PHONE_EXAMPLE}
               maxLength={15}
               value={formData.phone}
-              onChange={handleChange}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField('phone')
+              }}
             />
             <p className="form-hint">Enter digits only. Preview: {formatPhonePreview(formData.phone)}</p>
             {fieldErrors.phone && <p className="form-error">{fieldErrors.phone}</p>}
           </div>
+          <ClientSuggestions
+            clients={clients}
+            query={formData.phone}
+            field="phone"
+            visible={suggestionField === 'phone'}
+            onSelect={(client) => {
+              setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
+              setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
+              setSuggestionField(null)
+            }}
+          />
 
           <div className="form-group">
             <label htmlFor="edit-address">Address</label>
-            <input id="edit-address" name="address" value={formData.address} onChange={handleChange} placeholder="123 Main St, Springfield, IL 62704" />
+            <input
+              id="edit-address"
+              name="address"
+              value={formData.address}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField('address')
+              }}
+              placeholder="123 Main St, Springfield, IL 62704"
+              autoComplete="street-address"
+            />
             <p className="form-hint">Include street, city, and any unit details so the crew can find the appointment quickly.</p>
             {fieldErrors.address && <p className="form-error">{fieldErrors.address}</p>}
           </div>
+          <ClientSuggestions
+            clients={clients}
+            query={formData.address}
+            field="address"
+            visible={suggestionField === 'address'}
+            onSelect={(client) => {
+              setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
+              setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
+              setSuggestionField(null)
+            }}
+          />
 
           <div className="form-group">
             <label htmlFor="edit-job-type">Job type</label>
@@ -154,7 +195,10 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
               name="jobType"
               className="jobs-status-select"
               value={formData.jobType}
-              onChange={handleChange}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField(null)
+              }}
             >
               <option value="">Select a job type</option>
               {JOB_TYPE_OPTIONS.map((jobType) => (
@@ -168,20 +212,47 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
 
           <div className="form-group">
             <label htmlFor="edit-job-date">Date</label>
-            <input id="edit-job-date" name="jobDate" type="date" value={formData.jobDate} onChange={handleChange} />
+            <input
+              id="edit-job-date"
+              name="jobDate"
+              type="date"
+              value={formData.jobDate}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField(null)
+              }}
+            />
             {fieldErrors.jobDate && <p className="form-error">{fieldErrors.jobDate}</p>}
           </div>
 
           <div className="form-group">
             <label htmlFor="edit-start-time">Start time</label>
-            <input id="edit-start-time" name="startTime" type="time" value={formData.startTime} onChange={handleChange} />
+            <input
+              id="edit-start-time"
+              name="startTime"
+              type="time"
+              value={formData.startTime}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField(null)
+              }}
+            />
             <p className="form-hint">Each job reserves a one-hour timeslot starting at this time.</p>
             {fieldErrors.startTime && <p className="form-error">{fieldErrors.startTime}</p>}
           </div>
 
           <div className="form-group">
             <label htmlFor="edit-status">Status</label>
-            <select id="edit-status" name="status" className="jobs-status-select" value={formData.status} onChange={handleChange}>
+            <select
+              id="edit-status"
+              name="status"
+              className="jobs-status-select"
+              value={formData.status}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField(null)
+              }}
+            >
               {STATUS_OPTIONS.map((status) => (
                 <option key={status} value={status}>
                   {status}
@@ -200,14 +271,26 @@ export default function JobEditorModal({ job, saving, error, onClose, onSave }) 
               step="0.01"
               placeholder="0.00"
               value={formData.payment}
-              onChange={handleChange}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField(null)
+              }}
             />
             {fieldErrors.payment && <p className="form-error">{fieldErrors.payment}</p>}
           </div>
 
           <div className="form-group">
             <label htmlFor="edit-comments">Comments</label>
-            <textarea id="edit-comments" name="comments" value={formData.comments} onChange={handleChange} placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." />
+            <textarea
+              id="edit-comments"
+              name="comments"
+              value={formData.comments}
+              onChange={(event) => {
+                handleChange(event)
+                setSuggestionField(null)
+              }}
+              placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
+            />
             <p className="form-hint">Add gate codes, parking notes, scope details, or anything the team should know before arrival.</p>
             {fieldErrors.comments && <p className="form-error">{fieldErrors.comments}</p>}
           </div>

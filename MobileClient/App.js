@@ -43,6 +43,12 @@ const CALENDAR_VIEWS = [
   { key: 'year', label: 'Yearly' }
 ]
 const PHONE_EXAMPLE = '(555) 123-4567'
+const DEFAULT_JOB_DURATION_MINUTES = 60
+const DAY_TIMELINE_DEFAULT_START_HOUR = 8
+const DAY_TIMELINE_DEFAULT_END_HOUR = 18
+const DAY_TIMELINE_MIN_VISIBLE_HOURS = 8
+const DAY_TIMELINE_ROW_HEIGHT = 76
+const DAY_TIMELINE_MIN_CARD_HEIGHT = 56
 const JOB_TYPE_COLORS = {
   '0 Turn Mower': { background: '#22c55e', border: '#16a34a', text: '#f0fdf4' },
   'Push Mower': { background: '#f97316', border: '#ea580c', text: '#fff7ed' },
@@ -110,6 +116,14 @@ const formatTimeValue = (value) => {
   if (!parsed) return ''
   return `${String(parsed.hours).padStart(2, '0')}:${String(parsed.minutes).padStart(2, '0')}`
 }
+
+const parseTimeToMinutes = (value) => {
+  const parsed = parseTimeValue(value)
+  if (!parsed) return null
+  return (parsed.hours * 60) + parsed.minutes
+}
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
 const getDateTimestamp = (value) => {
   const date = parseDateValue(value)
@@ -237,6 +251,135 @@ const buildMonthGrid = (value) => {
 const getJobTypeColors = (jobType) =>
   JOB_TYPE_COLORS[jobType] || JOB_TYPE_COLORS[JOB_TYPE_OPTIONS[0]]
 
+const assignTimelineColumns = (scheduledJobs) => {
+  const sortedJobs = [...scheduledJobs].sort(
+    (first, second) =>
+      first.startMinutes - second.startMinutes ||
+      String(first.job.name || '').localeCompare(String(second.job.name || ''))
+  )
+  const laidOutJobs = []
+  let cluster = []
+  let clusterEndMinutes = 0
+
+  const flushCluster = () => {
+    if (cluster.length === 0) return
+
+    const columnEndTimes = []
+    let columnCount = 1
+
+    const positionedCluster = cluster.map((item) => {
+      let columnIndex = columnEndTimes.findIndex((endMinutes) => endMinutes <= item.startMinutes)
+
+      if (columnIndex === -1) {
+        columnIndex = columnEndTimes.length
+        columnEndTimes.push(item.endMinutes)
+      } else {
+        columnEndTimes[columnIndex] = item.endMinutes
+      }
+
+      columnCount = Math.max(columnCount, columnEndTimes.length)
+
+      return {
+        ...item,
+        columnIndex
+      }
+    })
+
+    laidOutJobs.push(
+      ...positionedCluster.map((item) => ({
+        ...item,
+        columnCount
+      }))
+    )
+
+    cluster = []
+    clusterEndMinutes = 0
+  }
+
+  sortedJobs.forEach((item) => {
+    if (cluster.length === 0) {
+      cluster = [item]
+      clusterEndMinutes = item.endMinutes
+      return
+    }
+
+    if (item.startMinutes < clusterEndMinutes) {
+      cluster.push(item)
+      clusterEndMinutes = Math.max(clusterEndMinutes, item.endMinutes)
+      return
+    }
+
+    flushCluster()
+    cluster = [item]
+    clusterEndMinutes = item.endMinutes
+  })
+
+  flushCluster()
+
+  return laidOutJobs
+}
+
+const buildDayTimeline = (dayJobs) => {
+  const scheduledJobs = []
+  const unscheduledJobs = []
+
+  dayJobs.forEach((job) => {
+    const startMinutes = parseTimeToMinutes(job.start_time)
+
+    if (startMinutes === null) {
+      unscheduledJobs.push(job)
+      return
+    }
+
+    scheduledJobs.push({
+      job,
+      startMinutes,
+      endMinutes: Math.min(startMinutes + DEFAULT_JOB_DURATION_MINUTES, 24 * 60)
+    })
+  })
+
+  let startHour = DAY_TIMELINE_DEFAULT_START_HOUR
+  let endHour = DAY_TIMELINE_DEFAULT_END_HOUR
+
+  if (scheduledJobs.length > 0) {
+    const earliestStartMinutes = Math.min(...scheduledJobs.map((item) => item.startMinutes))
+    const latestEndMinutes = Math.max(...scheduledJobs.map((item) => item.endMinutes))
+
+    startHour = clamp(Math.floor((earliestStartMinutes - 60) / 60), 0, 23)
+    endHour = clamp(Math.ceil((latestEndMinutes + 60) / 60), 1, 24)
+
+    if (endHour - startHour < DAY_TIMELINE_MIN_VISIBLE_HOURS) {
+      if (startHour <= DAY_TIMELINE_DEFAULT_START_HOUR) {
+        endHour = Math.min(24, startHour + DAY_TIMELINE_MIN_VISIBLE_HOURS)
+      } else {
+        startHour = Math.max(0, endHour - DAY_TIMELINE_MIN_VISIBLE_HOURS)
+      }
+    }
+  }
+
+  if (endHour - startHour < DAY_TIMELINE_MIN_VISIBLE_HOURS) {
+    endHour = Math.min(24, startHour + DAY_TIMELINE_MIN_VISIBLE_HOURS)
+    startHour = Math.max(0, endHour - DAY_TIMELINE_MIN_VISIBLE_HOURS)
+  }
+
+  const timelineStartMinutes = startHour * 60
+  const visibleHourCount = Math.max(endHour - startHour, 1)
+
+  return {
+    scheduledJobs: assignTimelineColumns(scheduledJobs),
+    unscheduledJobs,
+    timelineStartMinutes,
+    visibleHourCount,
+    timeSlots: Array.from({ length: visibleHourCount }, (_, index) => timelineStartMinutes + (index * 60))
+  }
+}
+
+const formatTimelineHourLabel = (value) =>
+  new Date(2000, 0, 1, Math.floor(value / 60), value % 60).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  }).replace(':00', '')
+
 const getCalendarRangeLabel = (view, anchorDate) => {
   if (view === 'day') {
     return formatFullDate(anchorDate)
@@ -282,6 +425,24 @@ const buildClients = (jobs) => {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+const getClientSuggestions = (clients, query, field) => {
+  const value = String(query || '').trim().toLowerCase()
+  if (!value) return []
+
+  if (field === 'phone') {
+    const digits = normalizePhoneDigits(query)
+    if (!digits) return []
+    return clients.filter((client) => normalizePhoneDigits(client.phone || '').includes(digits))
+  }
+
+  return clients.filter((client) => String(client[field] || '').toLowerCase().includes(value))
+}
+
+const applyClientDetails = (client) => ({
+  name: client.name || '',
+  phone: normalizePhoneDigits(client.phone || ''),
+  address: client.address || ''
+})
 
 
 export default function App() {
@@ -294,8 +455,6 @@ export default function App() {
   const [jobsError, setJobsError] = useState('')
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedClient, setSelectedClient] = useState(null)
-  const [clientMatches, setClientMatches] = useState([]);
-  const [showMatches, setShowMatches] = useState(false);
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', confirmPassword: '' })
   const [authErrors, setAuthErrors] = useState({})
@@ -304,6 +463,7 @@ export default function App() {
   const [jobForm, setJobForm] = useState(EMPTY_JOB_FORM)
   const [jobErrors, setJobErrors] = useState({})
   const [jobStatus, setJobStatus] = useState(null)
+  const [jobSuggestionField, setJobSuggestionField] = useState(null)
   const [clientSearch, setClientSearch] = useState('')
   const [calendarView, setCalendarView] = useState('day')
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => startOfDay(new Date()))
@@ -400,35 +560,6 @@ export default function App() {
       )
     )
   }, [clients, clientSearch])
-  
- 
-const searchClients = (query, field) => {
-  const value = query.trim().toLowerCase();
-
-  if (!value) {
-    setClientMatches([]);
-    setShowMatches(false);
-    return;
-  }
-
-  const matches = clients.filter((client) =>
-    (client[field] || '').toLowerCase().includes(value)
-  );
-
-  setClientMatches(matches);
-  setShowMatches(matches.length > 0);
-};
-
-const selectClient = (client) => {
-  setJobForm((current) => ({
-    ...current,
-    name: client.name || '',
-    phone: client.phone || '',
-    address: client.address || '',
-  }));
-
-  setShowMatches(false);
-};
 
   const jobsByDate = useMemo(() => {
     const groupedJobs = new Map()
@@ -443,9 +574,17 @@ const selectClient = (client) => {
 
     groupedJobs.forEach((group) => {
       group.sort((first, second) => {
-        const firstTime = String(first.start_time || '')
-        const secondTime = String(second.start_time || '')
-        return firstTime.localeCompare(secondTime) || first.name.localeCompare(second.name)
+        const firstTime = parseTimeToMinutes(first.start_time)
+        const secondTime = parseTimeToMinutes(second.start_time)
+
+        if (firstTime === null && secondTime === null) {
+          return first.name.localeCompare(second.name)
+        }
+
+        if (firstTime === null) return 1
+        if (secondTime === null) return -1
+
+        return firstTime - secondTime || first.name.localeCompare(second.name)
       })
     })
 
@@ -653,6 +792,7 @@ const selectClient = (client) => {
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create job')
       setJobForm(EMPTY_JOB_FORM)
+      setJobSuggestionField(null)
       setJobStatus({ type: 'success', message: 'Job created successfully' })
       await clearJobDraft()
       setActiveTab('calendar')
@@ -774,7 +914,6 @@ const selectClient = (client) => {
           <Pressable style={styles.inlineContentButton} onPress={() => setSelectedJob(job)}>
             <Text style={[styles.calendarJobTitle, { color: palette.text }]}>{job.name}</Text>
             <Text style={[styles.calendarJobType, { color: palette.text }]}>{formatTimeRange(job.start_time)}</Text>
-            <Text style={[styles.calendarJobType, { color: palette.text }]}>{job.job_type}</Text>
             {!compact ? (
               <Text style={[styles.calendarJobMeta, { color: palette.text }]}>
                 {job.address || '-'} | {formatCurrency(job.payment)}
@@ -789,9 +928,54 @@ const selectClient = (client) => {
     )
   }
 
+  const renderCalendarTimelineJobCard = (item, timelineStartMinutes) => {
+    const { job, startMinutes, endMinutes, columnIndex, columnCount } = item
+    const palette = getJobTypeColors(job.job_type)
+    const top = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT + 6
+    const height = Math.max(((endMinutes - startMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT - 12, DAY_TIMELINE_MIN_CARD_HEIGHT)
+    const width = `${100 / columnCount}%`
+    const left = `${(100 / columnCount) * columnIndex}%`
+
+    return (
+      <Pressable
+        key={job.id}
+        style={[
+          styles.calendarTimelineCard,
+          {
+            top,
+            left,
+            width,
+            height,
+            backgroundColor: palette.background,
+            borderColor: palette.border
+          }
+        ]}
+        onPress={() => setSelectedJob(job)}
+      >
+        <Pressable
+          style={styles.calendarTimelineEditButton}
+          onPress={() => setSelectedJob(job)}
+        >
+          <Text style={styles.calendarTimelineEditText}>Edit</Text>
+        </Pressable>
+        <Text style={[styles.calendarTimelineHeader, { color: palette.text }]} numberOfLines={1}>
+          {job.name || 'No client'} | {formatDate(job.job_date)}
+        </Text>
+        <Text style={[styles.calendarTimelineAddress, { color: palette.text }]} numberOfLines={1}>
+          {job.address || 'No address'}
+        </Text>
+        <Text style={[styles.calendarTimelineTime, { color: palette.text }]} numberOfLines={1}>
+          {formatTimeRange(job.start_time)}
+        </Text>
+      </Pressable>
+    )
+  }
+
   const renderCalendarContent = () => {
     if (calendarView === 'day') {
       const dayJobs = jobsByDate.get(toDateKey(calendarAnchorDate)) || []
+      const { scheduledJobs, unscheduledJobs, timelineStartMinutes, visibleHourCount, timeSlots } = buildDayTimeline(dayJobs)
+      const timelineHeight = visibleHourCount * DAY_TIMELINE_ROW_HEIGHT
 
       return (
         <>
@@ -808,10 +992,34 @@ const selectClient = (client) => {
                 <Text style={commonStyles.text}>No jobs are scheduled for this day.</Text>
               </View>
             ) : (
-              <View style={styles.calendarAgendaList}>
-                {dayJobs.map((job) => renderCalendarJobCard(job))}
+              <View style={styles.calendarTimelineShell}>
+                <View style={styles.calendarTimelineTimeRail}>
+                  {timeSlots.map((slotMinutes) => (
+                    <Text key={`label-${slotMinutes}`} style={styles.calendarTimelineTimeLabel}>
+                      {formatTimelineHourLabel(slotMinutes)}
+                    </Text>
+                  ))}
+                </View>
+                <View style={styles.calendarTimelineGridWrap}>
+                  <View style={[styles.calendarTimelineGrid, { height: timelineHeight }]}>
+                    {timeSlots.map((slotMinutes) => (
+                      <View key={`row-${slotMinutes}`} style={styles.calendarTimelineRow} />
+                    ))}
+                    <View style={styles.calendarTimelineOverlay}>
+                      {scheduledJobs.map((item) => renderCalendarTimelineJobCard(item, timelineStartMinutes))}
+                    </View>
+                  </View>
+                </View>
               </View>
             )}
+            {unscheduledJobs.length > 0 ? (
+              <View style={styles.calendarUnscheduledBlock}>
+                <Text style={commonStyles.muted}>No timeslot yet</Text>
+                <View style={styles.calendarAgendaList}>
+                  {unscheduledJobs.map((job) => renderCalendarJobCard(job, true))}
+                </View>
+              </View>
+            ) : null}
           </View>
         </>
       )
@@ -1092,35 +1300,56 @@ const selectClient = (client) => {
                 setJobForm((current) => ({ ...current, name: value }))
                 setJobErrors((current) => ({ ...current, name: '' }))
                 setJobStatus(null)
-                searchClients(value, 'name')
+                setJobSuggestionField('name')
               }} error={jobErrors.name} placeholder="Jane Smith" />
-              {showMatches && (
-                <View style={styles.suggestionBox}>
-                  {clientMatches.map((client, index) => (
-                    <Pressable
-                      key={index}
-                      onPress={() => selectClient(client)}
-                      style={styles.suggestionItem}
-                    >
-                      <Text>{client.name}</Text>
-                      <Text>{formatPhonePreview(client.phone)}</Text>
-                      <Text>{client.address}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
+              <ClientSuggestions
+                clients={clients}
+                query={jobForm.name}
+                field="name"
+                visible={jobSuggestionField === 'name'}
+                onSelect={(client) => {
+                  setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setJobSuggestionField(null)
+                  setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                  setJobStatus(null)
+                }}
+              />
               <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
                 setJobErrors((current) => ({ ...current, phone: '' }))
                 setJobStatus(null)
-                searchClients(value, 'phone')
+                setJobSuggestionField('phone')
               }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
+              <ClientSuggestions
+                clients={clients}
+                query={jobForm.phone}
+                field="phone"
+                visible={jobSuggestionField === 'phone'}
+                onSelect={(client) => {
+                  setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setJobSuggestionField(null)
+                  setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                  setJobStatus(null)
+                }}
+              />
               <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
                 setJobForm((current) => ({ ...current, address: value }))
                 setJobErrors((current) => ({ ...current, address: '' }))
                 setJobStatus(null)
-                searchClients(value, 'address')
+                setJobSuggestionField('address')
               }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <ClientSuggestions
+                clients={clients}
+                query={jobForm.address}
+                field="address"
+                visible={jobSuggestionField === 'address'}
+                onSelect={(client) => {
+                  setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setJobSuggestionField(null)
+                  setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                  setJobStatus(null)
+                }}
+              />
               <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
                 setJobForm((current) => ({ ...current, jobType: value }))
                 setJobErrors((current) => ({ ...current, jobType: '' }))
@@ -1235,8 +1464,8 @@ const selectClient = (client) => {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
-      <JobModal job={selectedJob} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
-      <ClientModal client={selectedClient} onClose={() => setSelectedClient(null)} onSave={saveClientUpdates} />
+      <JobModal job={selectedJob} clients={clients} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
+      <ClientModal client={selectedClient} clients={clients} onClose={() => setSelectedClient(null)} onSave={saveClientUpdates} />
     </SafeAreaView>
   )
 }
@@ -1258,6 +1487,38 @@ function FormField({ label, error, helperText, multiline, ...props }) {
       <TextInput style={[commonStyles.input, multiline ? styles.multiline : null]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
       {helperText ? <Text style={commonStyles.helperText}>{helperText}</Text> : null}
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
+    </View>
+  )
+}
+
+function ClientSuggestions({ clients, query, field, visible, onSelect }) {
+  const matches = visible ? getClientSuggestions(clients, query, field).slice(0, 6) : []
+
+  if (!visible || matches.length === 0) return null
+
+  return (
+    <View style={styles.suggestionBox}>
+      {matches.map((client, index) => (
+        <Pressable
+          key={client.id ?? `${client.name || 'client'}-${client.phone || ''}-${client.address || ''}-${index}`}
+          onPress={() => onSelect(client)}
+          style={({ pressed }) => [
+            styles.suggestionItem,
+            index === matches.length - 1 ? styles.suggestionItemLast : null,
+            pressed ? styles.suggestionItemPressed : null
+          ]}
+        >
+          <Text style={styles.suggestionName} numberOfLines={1}>
+            {client.name || 'No name'}
+          </Text>
+          <Text style={styles.suggestionMeta} numberOfLines={1}>
+            {formatPhonePreview(client.phone)}
+          </Text>
+          <Text style={styles.suggestionMeta} numberOfLines={1}>
+            {client.address || 'No address'}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   )
 }
@@ -1522,16 +1783,18 @@ function JobCard({ job, onPress, onDelete }) {
   )
 }
 
-function ClientModal({ client, onClose, onSave }) {
+function ClientModal({ client, clients, onClose, onSave }) {
   const [formState, setFormState] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [suggestionField, setSuggestionField] = useState(null)
 
   useEffect(() => {
     if (!client) {
       setFormState(null)
       setSaving(false)
       setError('')
+      setSuggestionField(null)
       return
     }
 
@@ -1540,6 +1803,7 @@ function ClientModal({ client, onClose, onSave }) {
       phone: client.phone || '',
       address: client.address || ''
     })
+    setSuggestionField(null)
   }, [client])
 
   if (!client) return null
@@ -1572,9 +1836,48 @@ function ClientModal({ client, onClose, onSave }) {
             >
               <Text style={commonStyles.sectionTitle}>Edit client</Text>
               <Text style={commonStyles.text}>Update the client details used across this client&apos;s jobs.</Text>
-              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} placeholder="Jane Smith" />
-              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: normalizePhoneDigits(value) }))} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(formState?.phone || '')}`} />
-              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => {
+                setFormState((current) => ({ ...current, name: value }))
+                setSuggestionField('name')
+              }} placeholder="Jane Smith" />
+              <ClientSuggestions
+                clients={clients}
+                query={formState?.name || ''}
+                field="name"
+                visible={suggestionField === 'name'}
+                onSelect={(client) => {
+                  setFormState((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setSuggestionField(null)
+                }}
+              />
+              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => {
+                setFormState((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
+                setSuggestionField('phone')
+              }} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(formState?.phone || '')}`} />
+              <ClientSuggestions
+                clients={clients}
+                query={formState?.phone || ''}
+                field="phone"
+                visible={suggestionField === 'phone'}
+                onSelect={(client) => {
+                  setFormState((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setSuggestionField(null)
+                }}
+              />
+              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => {
+                setFormState((current) => ({ ...current, address: value }))
+                setSuggestionField('address')
+              }} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <ClientSuggestions
+                clients={clients}
+                query={formState?.address || ''}
+                field="address"
+                visible={suggestionField === 'address'}
+                onSelect={(client) => {
+                  setFormState((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setSuggestionField(null)
+                }}
+              />
               {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
               <View style={styles.modalActions}>
                 <Pressable style={[commonStyles.button, commonStyles.buttonSecondary, styles.modalAction]} onPress={onClose}>
@@ -1592,16 +1895,18 @@ function ClientModal({ client, onClose, onSave }) {
   )
 }
 
-function JobModal({ job, onClose, onSave, onDelete }) {
+function JobModal({ job, clients, onClose, onSave, onDelete }) {
   const [formState, setFormState] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [suggestionField, setSuggestionField] = useState(null)
 
   useEffect(() => {
     if (!job) {
       setFormState(null)
       setSaving(false)
       setError('')
+      setSuggestionField(null)
       return
     }
 
@@ -1616,6 +1921,7 @@ function JobModal({ job, onClose, onSave, onDelete }) {
       comments: job.comments || '',
       status: job.status || 'Pending'
     })
+    setSuggestionField(null)
   }, [job])
 
   if (!job) return null
@@ -1647,9 +1953,48 @@ function JobModal({ job, onClose, onSave, onDelete }) {
             >
               <Text style={commonStyles.sectionTitle}>Edit job</Text>
               <Text style={commonStyles.text}>Update client details, status, payment, and notes from this mobile sheet.</Text>
-              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => setFormState((current) => ({ ...current, name: value }))} placeholder="Jane Smith" />
-              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => setFormState((current) => ({ ...current, phone: normalizePhoneDigits(value) }))} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(formState?.phone || '')}`} />
-              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => setFormState((current) => ({ ...current, address: value }))} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <FormField label="Client name" value={formState?.name || ''} onChangeText={(value) => {
+                setFormState((current) => ({ ...current, name: value }))
+                setSuggestionField('name')
+              }} placeholder="Jane Smith" />
+              <ClientSuggestions
+                clients={clients}
+                query={formState?.name || ''}
+                field="name"
+                visible={suggestionField === 'name'}
+                onSelect={(client) => {
+                  setFormState((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setSuggestionField(null)
+                }}
+              />
+              <FormField label="Phone" value={formState?.phone || ''} onChangeText={(value) => {
+                setFormState((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
+                setSuggestionField('phone')
+              }} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(formState?.phone || '')}`} />
+              <ClientSuggestions
+                clients={clients}
+                query={formState?.phone || ''}
+                field="phone"
+                visible={suggestionField === 'phone'}
+                onSelect={(client) => {
+                  setFormState((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setSuggestionField(null)
+                }}
+              />
+              <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => {
+                setFormState((current) => ({ ...current, address: value }))
+                setSuggestionField('address')
+              }} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              <ClientSuggestions
+                clients={clients}
+                query={formState?.address || ''}
+                field="address"
+                visible={suggestionField === 'address'}
+                onSelect={(client) => {
+                  setFormState((current) => ({ ...current, ...applyClientDetails(client) }))
+                  setSuggestionField(null)
+                }}
+              />
               <SelectField label="Job type" value={formState?.jobType || ''} onChange={(value) => setFormState((current) => ({ ...current, jobType: value }))} options={JOB_TYPE_OPTIONS} />
               <DateField label="Date" value={formState?.jobDate || ''} onChange={(value) => setFormState((current) => ({ ...current, jobDate: value }))} />
               <TimeField label="Start time" value={formState?.startTime || ''} onChange={(value) => setFormState((current) => ({ ...current, startTime: value }))} />
@@ -1793,23 +2138,37 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong
   },
   suggestionBox: {
-  backgroundColor: '#fff',
-  borderWidth: 1,
-  borderColor: '#ddd',
-  borderRadius: 8,
-  marginTop: 4,
-  zIndex: 999,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: colors.panel
   },
   suggestionItem: {
-  paddingVertical: 12,
-  paddingHorizontal: 14,
-  borderBottomWidth: 1,
-  borderBottomColor: '#e5e7eb',
-  backgroundColor: '#fff',
-},
-suggestionItemPressed: {
-  backgroundColor: '#e5e7eb',
-},
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.card
+  },
+  suggestionItemLast: {
+    borderBottomWidth: 0
+  },
+  suggestionItemPressed: {
+    backgroundColor: 'rgba(109, 124, 255, 0.14)'
+  },
+  suggestionName: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  suggestionMeta: {
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2
+  },
   inlineActionText: {
     color: colors.heading,
     fontSize: 12,
@@ -1882,7 +2241,99 @@ suggestionItemPressed: {
     justifyContent: 'center',
     padding: 16
   },
+  calendarTimelineShell: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'stretch'
+  },
+  calendarTimelineTimeRail: {
+    width: 58,
+    paddingTop: 6,
+    gap: 0
+  },
+  calendarTimelineTimeLabel: {
+    height: DAY_TIMELINE_ROW_HEIGHT,
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase'
+  },
+  calendarTimelineGridWrap: {
+    flex: 1,
+    minWidth: 0
+  },
+  calendarTimelineGrid: {
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: colors.card
+  },
+  calendarTimelineRow: {
+    height: DAY_TIMELINE_ROW_HEIGHT,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.02)'
+  },
+  calendarTimelineOverlay: {
+    ...StyleSheet.absoluteFillObject
+  },
+  calendarTimelineCard: {
+    position: 'absolute',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    overflow: 'hidden',
+    justifyContent: 'flex-start'
+  },
+  calendarTimelineEditButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    minHeight: 26,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+    zIndex: 2
+  },
+  calendarTimelineEditText: {
+    color: colors.heading,
+    fontSize: 11,
+    fontWeight: '800'
+  },
+  calendarTimelineHeader: {
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '800'
+  },
+  calendarTimelineAddress: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '700',
+    marginTop: 2
+  },
+  calendarTimelineTime: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '700',
+    marginTop: 2
+  },
   calendarAgendaList: { gap: 12, marginTop: 12 },
+  calendarUnscheduledBlock: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 10
+  },
   calendarJobCard: {
     borderWidth: 1,
     borderRadius: 18,

@@ -1,7 +1,10 @@
 import { useApi } from './apiContext'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { JOB_TYPE_OPTIONS } from './jobTypes'
+import ClientSuggestions from './ClientSuggestions'
+import { applyClientSuggestion, buildClients, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
+import { parseDateValue } from './dateUtils'
 
 const EMPTY_FORM_DATA = {
   name: '',
@@ -19,33 +22,17 @@ const getDraftStorageKey = (userId) =>
 
 const PHONE_EXAMPLE = '(555) 123-4567'
 
-const formatPhonePreview = (value) => {
-  const digits = String(value || '').replace(/\D/g, '').slice(0, 15)
-
-  if (!digits) return PHONE_EXAMPLE
-
-  if (digits.length <= 3) return `(${digits}`
-  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
-  if (digits.length <= 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
-
-  if (digits[0] === '1' && digits.length <= 11) {
-    const local = digits.slice(1)
-    if (local.length <= 3) return `1 (${local}`
-    if (local.length <= 6) return `1 (${local.slice(0, 3)}) ${local.slice(3)}`
-    return `1 (${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
-  }
-
-  return digits.replace(/(\d{3})(?=\d)/g, '$1 ').trim()
-}
-
 export default function JobForm({ currentUser }) {
   const [formData, setFormData] = useState(EMPTY_FORM_DATA)
   const [errors, setErrors] = useState({})
   const [successMessage, setSuccessMessage] = useState('')
+  const [clientJobs, setClientJobs] = useState([])
+  const [suggestionField, setSuggestionField] = useState(null)
   const navigate = useNavigate()
   const redirectTimer = useRef(null)
   const isInitialMount = useRef(true)
   const { fetchWithAuth } = useApi()
+  const clients = useMemo(() => buildClients(clientJobs), [clientJobs])
 
   const validateField = (name, value) => {
     switch (name) {
@@ -65,8 +52,7 @@ export default function JobForm({ currentUser }) {
         return ''
       case 'jobDate': {
         if (!value) return 'Date is required'
-        const parsed = new Date(value)
-        if (Number.isNaN(parsed.getTime())) return 'Invalid date'
+        if (!parseDateValue(value)) return 'Invalid date'
         return ''
       }
       case 'startTime':
@@ -90,7 +76,7 @@ export default function JobForm({ currentUser }) {
     let { name, value } = e.target
 
     if (name === 'phone') {
-      value = value.replace(/\D/g, '').slice(0, 15)
+      value = normalizePhoneDigits(value)
     }
 
     setFormData((prev) => ({ ...prev, [name]: value }))
@@ -130,6 +116,7 @@ export default function JobForm({ currentUser }) {
         setErrors((prev) => ({ ...prev, submit: '' }))
         setSuccessMessage('Job created! Redirecting to Jobs...')
         setFormData(EMPTY_FORM_DATA)
+        setSuggestionField(null)
         redirectTimer.current = setTimeout(() => {
           navigate('/jobs')
         }, 1000)
@@ -149,11 +136,37 @@ export default function JobForm({ currentUser }) {
   const hasErrors = Object.values(errors).some(Boolean)
 
   useEffect(() => {
+    if (!currentUser) {
+      setClientJobs([])
+      return
+    }
+
+    let active = true
+
+    const loadClients = async () => {
+      try {
+        const res = await fetchWithAuth('/jobs')
+        if (!res.ok) throw new Error('Unable to load client suggestions')
+        const data = await res.json()
+        if (active) setClientJobs(Array.isArray(data) ? data : [])
+      } catch (err) {
+        console.error('Failed loading client suggestions:', err)
+        if (active) setClientJobs([])
+      }
+    }
+
+    loadClients()
+
+    return () => {
+      active = false
+    }
+  }, [currentUser, fetchWithAuth])
+
+  useEffect(() => {
     if (typeof window === 'undefined') return
 
     const savedDraft = window.localStorage.getItem(getDraftStorageKey(currentUser?.id))
     if (!savedDraft) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormData(EMPTY_FORM_DATA)
       setErrors({})
       setSuccessMessage('')
@@ -224,9 +237,40 @@ export default function JobForm({ currentUser }) {
 
       <div className="form-group">
         <label htmlFor="name">Client name</label>
-        <input id="name" name="name" type="text" required onChange={handleChange} value={formData.name} placeholder="Jane Smith" />
+        <input
+          id="name"
+          name="name"
+          type="text"
+          autoComplete="name"
+          required
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField('name')
+          }}
+          value={formData.name}
+          placeholder="Jane Smith"
+        />
         {errors.name && <div className="form-error">{errors.name}</div>}
       </div>
+      <ClientSuggestions
+        clients={clients}
+        query={formData.name}
+        field="name"
+        visible={suggestionField === 'name'}
+        onSelect={(client) => {
+          setFormData((prev) => ({
+            ...prev,
+            ...applyClientSuggestion(client)
+          }))
+          setErrors((prev) => ({
+            ...prev,
+            name: '',
+            phone: '',
+            address: ''
+          }))
+          setSuggestionField(null)
+        }}
+      />
 
       <div className="form-group">
         <label htmlFor="phone">Phone</label>
@@ -238,7 +282,10 @@ export default function JobForm({ currentUser }) {
           pattern="[0-9]*"
           autoComplete="tel"
           required
-          onChange={handleChange}
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField('phone')
+          }}
           value={formData.phone}
           maxLength={15}
           placeholder={PHONE_EXAMPLE}
@@ -246,13 +293,63 @@ export default function JobForm({ currentUser }) {
         <div className="form-hint">Enter digits only. Preview: {formatPhonePreview(formData.phone)}</div>
         {errors.phone && <div className="form-error">{errors.phone}</div>}
       </div>
+      <ClientSuggestions
+        clients={clients}
+        query={formData.phone}
+        field="phone"
+        visible={suggestionField === 'phone'}
+        onSelect={(client) => {
+          setFormData((prev) => ({
+            ...prev,
+            ...applyClientSuggestion(client)
+          }))
+          setErrors((prev) => ({
+            ...prev,
+            name: '',
+            phone: '',
+            address: ''
+          }))
+          setSuggestionField(null)
+        }}
+      />
 
       <div className="form-group">
         <label htmlFor="address">Address</label>
-        <input id="address" name="address" type="text" required onChange={handleChange} value={formData.address} placeholder="123 Main St, Springfield, IL 62704" />
+        <input
+          id="address"
+          name="address"
+          type="text"
+          autoComplete="street-address"
+          required
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField('address')
+          }}
+          value={formData.address}
+          placeholder="123 Main St, Springfield, IL 62704"
+        />
         <div className="form-hint">Include street, city, and any unit details so the crew can find the appointment quickly.</div>
         {errors.address && <div className="form-error">{errors.address}</div>}
       </div>
+      <ClientSuggestions
+        clients={clients}
+        query={formData.address}
+        field="address"
+        visible={suggestionField === 'address'}
+        onSelect={(client) => {
+          setFormData((prev) => ({
+            ...prev,
+            ...applyClientSuggestion(client)
+          }))
+          setErrors((prev) => ({
+            ...prev,
+            name: '',
+            phone: '',
+            address: ''
+          }))
+          setSuggestionField(null)
+        }}
+      />
 
       <div className="form-group">
         <label htmlFor="jobType">Job type</label>
@@ -261,7 +358,10 @@ export default function JobForm({ currentUser }) {
           name="jobType"
           required
           className="jobs-status-select"
-          onChange={handleChange}
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField(null)
+          }}
           value={formData.jobType}
         >
           <option value="">Select a job type</option>
@@ -277,7 +377,18 @@ export default function JobForm({ currentUser }) {
 
       <div className="form-group">
         <label htmlFor="jobDate">Date</label>
-        <input id="jobDate" name="jobDate" type="date" required onChange={handleChange} value={formData.jobDate} placeholder="YYYY-MM-DD" />
+        <input
+          id="jobDate"
+          name="jobDate"
+          type="date"
+          required
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField(null)
+          }}
+          value={formData.jobDate}
+          placeholder="YYYY-MM-DD"
+        />
         {errors.jobDate && <div className="form-error">{errors.jobDate}</div>}
       </div>
 
@@ -288,7 +399,10 @@ export default function JobForm({ currentUser }) {
           name="startTime"
           type="time"
           required
-          onChange={handleChange}
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField(null)
+          }}
           value={formData.startTime}
         />
         <div className="form-hint">Each job reserves a one-hour timeslot starting at this time.</div>
@@ -304,7 +418,10 @@ export default function JobForm({ currentUser }) {
           min="0"
           step="0.01"
           inputMode="decimal"
-          onChange={handleChange}
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField(null)
+          }}
           value={formData.payment}
           placeholder="0.00"
         />
@@ -313,7 +430,16 @@ export default function JobForm({ currentUser }) {
 
       <div className="form-group">
         <label htmlFor="comments">Comments</label>
-        <textarea id="comments" name="comments" onChange={handleChange} value={formData.comments} placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."></textarea>
+        <textarea
+          id="comments"
+          name="comments"
+          onChange={(e) => {
+            handleChange(e)
+            setSuggestionField(null)
+          }}
+          value={formData.comments}
+          placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
+        ></textarea>
         <div className="form-hint">Add gate codes, parking notes, scope details, or anything the team should know before arrival.</div>
         {errors.comments && <div className="form-error">{errors.comments}</div>}
       </div>

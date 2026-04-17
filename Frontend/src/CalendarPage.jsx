@@ -1,6 +1,9 @@
 import { useApi } from './apiContext'
 import { useEffect, useMemo, useState } from 'react'
+import JobEditorModal from './JobEditorModal'
+import { buildClients } from './clientUtils'
 import { getJobTypePalette, JOB_TYPE_OPTIONS } from './jobTypes'
+import { parseDateValue } from './dateUtils'
 
 const CALENDAR_VIEWS = [
   { key: 'day', label: 'Daily' },
@@ -11,6 +14,12 @@ const CALENDAR_VIEWS = [
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MAX_VISIBLE_JOBS_PER_DAY = 3
+const DAY_TIMELINE_DEFAULT_START_HOUR = 8
+const DAY_TIMELINE_DEFAULT_END_HOUR = 18
+const DAY_TIMELINE_MIN_VISIBLE_HOURS = 8
+const DAY_TIMELINE_ROW_HEIGHT = 76
+const DAY_TIMELINE_EVENT_GAP = 12
+const DEFAULT_JOB_DURATION_MINUTES = 60
 
 const startOfDay = (value) => {
   const date = new Date(value)
@@ -53,6 +62,24 @@ const formatCurrency = (value) =>
     currency: 'USD'
   }).format(Number(value) || 0)
 
+const parseTimeToMinutes = (timeValue) => {
+  if (!timeValue) return null
+
+  const match = String(timeValue).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 23 || minutes > 59) {
+    return null
+  }
+
+  return (hours * 60) + minutes
+}
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
+
 const formatMonthLabel = (date) =>
   date.toLocaleDateString('en-US', {
     month: 'long',
@@ -75,9 +102,14 @@ const formatShortDate = (date) =>
     day: 'numeric'
   })
 
+const formatTimelineLabel = (totalMinutes) =>
+  new Date(2000, 0, 1, Math.floor(totalMinutes / 60), totalMinutes % 60).toLocaleTimeString('en-US', {
+    hour: 'numeric'
+  })
+
 const formatFullDate = (dateString) => {
-  const date = new Date(dateString)
-  if (Number.isNaN(date.getTime())) return '-'
+  const date = parseDateValue(dateString)
+  if (!date) return '-'
 
   return date.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -155,23 +187,159 @@ const getCalendarJobStyle = (jobType) => {
   }
 }
 
-function CalendarJobCard({ job, onClick, compact = false }) {
+const assignTimelineColumns = (scheduledJobs) => {
+  const sortedJobs = [...scheduledJobs].sort(
+    (first, second) => first.startMinutes - second.startMinutes || first.job.name.localeCompare(second.job.name)
+  )
+  const laidOutJobs = []
+  let cluster = []
+  let clusterEndMinutes = 0
+
+  const flushCluster = () => {
+    if (cluster.length === 0) return
+
+    const columnEndTimes = []
+    let columnCount = 1
+
+    const positionedCluster = cluster.map((item) => {
+      let columnIndex = columnEndTimes.findIndex((endMinutes) => endMinutes <= item.startMinutes)
+
+      if (columnIndex === -1) {
+        columnIndex = columnEndTimes.length
+        columnEndTimes.push(item.endMinutes)
+      } else {
+        columnEndTimes[columnIndex] = item.endMinutes
+      }
+
+      columnCount = Math.max(columnCount, columnEndTimes.length)
+
+      return {
+        ...item,
+        columnIndex
+      }
+    })
+
+    laidOutJobs.push(
+      ...positionedCluster.map((item) => ({
+        ...item,
+        columnCount
+      }))
+    )
+
+    cluster = []
+    clusterEndMinutes = 0
+  }
+
+  sortedJobs.forEach((item) => {
+    if (cluster.length === 0) {
+      cluster = [item]
+      clusterEndMinutes = item.endMinutes
+      return
+    }
+
+    if (item.startMinutes < clusterEndMinutes) {
+      cluster.push(item)
+      clusterEndMinutes = Math.max(clusterEndMinutes, item.endMinutes)
+      return
+    }
+
+    flushCluster()
+    cluster = [item]
+    clusterEndMinutes = item.endMinutes
+  })
+
+  flushCluster()
+
+  return laidOutJobs
+}
+
+const buildDayTimeline = (dayJobs) => {
+  const scheduledJobs = []
+  const unscheduledJobs = []
+
+  dayJobs.forEach((job) => {
+    const startMinutes = parseTimeToMinutes(job.start_time)
+
+    if (startMinutes === null) {
+      unscheduledJobs.push(job)
+      return
+    }
+
+    scheduledJobs.push({
+      job,
+      startMinutes,
+      endMinutes: Math.min(startMinutes + DEFAULT_JOB_DURATION_MINUTES, 24 * 60)
+    })
+  })
+
+  let startHour = DAY_TIMELINE_DEFAULT_START_HOUR
+  let endHour = DAY_TIMELINE_DEFAULT_END_HOUR
+
+  if (scheduledJobs.length > 0) {
+    const earliestStartMinutes = Math.min(...scheduledJobs.map((item) => item.startMinutes))
+    const latestEndMinutes = Math.max(...scheduledJobs.map((item) => item.endMinutes))
+
+    startHour = clamp(Math.floor((earliestStartMinutes - 60) / 60), 0, 23)
+    endHour = clamp(Math.ceil((latestEndMinutes + 60) / 60), 1, 24)
+
+    if (endHour - startHour < DAY_TIMELINE_MIN_VISIBLE_HOURS) {
+      if (startHour <= DAY_TIMELINE_DEFAULT_START_HOUR) {
+        endHour = Math.min(24, startHour + DAY_TIMELINE_MIN_VISIBLE_HOURS)
+      } else {
+        startHour = Math.max(0, endHour - DAY_TIMELINE_MIN_VISIBLE_HOURS)
+      }
+    }
+  }
+
+  if (endHour - startHour < DAY_TIMELINE_MIN_VISIBLE_HOURS) {
+    endHour = Math.min(24, startHour + DAY_TIMELINE_MIN_VISIBLE_HOURS)
+    startHour = Math.max(0, endHour - DAY_TIMELINE_MIN_VISIBLE_HOURS)
+  }
+
+  const timelineStartMinutes = startHour * 60
+  const visibleHourCount = Math.max(endHour - startHour, 1)
+
+  return {
+    scheduledJobs: assignTimelineColumns(scheduledJobs),
+    unscheduledJobs,
+    timelineStartMinutes,
+    visibleHourCount,
+    timeSlots: Array.from({ length: visibleHourCount }, (_, index) => timelineStartMinutes + (index * 60))
+  }
+}
+
+function CalendarJobCard({ job, onClick, onEdit, compact = false, className = '', style, showMeta = !compact }) {
   return (
-    <button
-      type="button"
-      className={`calendar-job-pill${compact ? ' calendar-job-pill--compact' : ''}`}
-      style={getCalendarJobStyle(job.job_type)}
-      onClick={() => onClick(job)}
+    <div
+      className={`calendar-job-pill${compact ? ' calendar-job-pill--compact' : ''}${onEdit ? ' calendar-job-pill--editable' : ''}${className ? ` ${className}` : ''}`}
+      style={{ ...getCalendarJobStyle(job.job_type), ...style }}
     >
-      <span className="calendar-job-pill-title">{job.name}</span>
-      <span className="calendar-job-pill-type">{formatTimeRange(job.start_time)}</span>
-      <span className="calendar-job-pill-type">{job.job_type}</span>
-      {!compact && (
-        <span className="calendar-job-pill-meta">
-          {job.address || 'No address'} | {formatCurrency(job.payment)}
-        </span>
-      )}
-    </button>
+      <button
+        type="button"
+        className="calendar-job-pill-main"
+        onClick={() => onClick(job)}
+      >
+        <span className="calendar-job-pill-title">{job.name}</span>
+        <span className="calendar-job-pill-type">{formatTimeRange(job.start_time)}</span>
+        {showMeta && (
+          <span className="calendar-job-pill-meta">
+            {job.address || 'No address'} | {formatCurrency(job.payment)}
+          </span>
+        )}
+      </button>
+      {onEdit ? (
+        <button
+          type="button"
+          className="calendar-job-pill-edit"
+          onClick={(event) => {
+            event.stopPropagation()
+            onEdit(job)
+          }}
+        >
+          Edit
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -180,6 +348,9 @@ export default function CalendarPage({ currentUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedJob, setSelectedJob] = useState(null)
+  const [editingJob, setEditingJob] = useState(null)
+  const [isSavingJob, setIsSavingJob] = useState(false)
+  const [editError, setEditError] = useState('')
   const [calendarView, setCalendarView] = useState('day')
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()))
 
@@ -217,8 +388,8 @@ export default function CalendarPage({ currentUser }) {
     const map = new Map()
 
     jobs.forEach((job) => {
-      const date = new Date(job.job_date)
-      if (Number.isNaN(date.getTime())) return
+      const date = parseDateValue(job.job_date)
+      if (!date) return
 
       const key = getDateKey(date)
       const existingJobs = map.get(key) || []
@@ -226,15 +397,24 @@ export default function CalendarPage({ currentUser }) {
       map.set(
         key,
         existingJobs.sort((first, second) => {
-          const firstTime = String(first.start_time || '')
-          const secondTime = String(second.start_time || '')
-          return firstTime.localeCompare(secondTime) || first.name.localeCompare(second.name)
+          const firstTime = parseTimeToMinutes(first.start_time)
+          const secondTime = parseTimeToMinutes(second.start_time)
+
+          if (firstTime === null && secondTime === null) {
+            return first.name.localeCompare(second.name)
+          }
+
+          if (firstTime === null) return 1
+          if (secondTime === null) return -1
+
+          return firstTime - secondTime || first.name.localeCompare(second.name)
         })
       )
     })
 
     return map
   }, [jobs])
+  const clients = useMemo(() => buildClients(jobs), [jobs])
 
   const today = startOfDay(new Date())
   const todayKey = getDateKey(today)
@@ -270,8 +450,96 @@ export default function CalendarPage({ currentUser }) {
     setSelectedJob(null)
   }
 
+  const openEditJob = (job) => {
+    setEditingJob(job)
+    setEditError('')
+  }
+
+  const closeEditJob = () => {
+    setEditingJob(null)
+    setEditError('')
+  }
+
+  const applyJobUpdate = (jobId, updates) => {
+    setJobs((prev) =>
+      prev.map((job) => {
+        if (job.id !== jobId) return job
+        return {
+          ...job,
+          ...updates,
+          payment:
+            updates.payment !== undefined
+              ? Number(updates.payment).toFixed(2)
+              : job.payment,
+          comments:
+            updates.comments !== undefined
+              ? updates.comments || null
+              : job.comments
+        }
+      })
+    )
+
+    setSelectedJob((current) => {
+      if (!current || current.id !== jobId) return current
+      return {
+        ...current,
+        ...updates,
+        payment:
+          updates.payment !== undefined
+            ? Number(updates.payment).toFixed(2)
+            : current.payment,
+        comments:
+          updates.comments !== undefined
+            ? updates.comments || null
+            : current.comments
+      }
+    })
+  }
+
+  const saveJobEdits = async (updates) => {
+    if (!editingJob) return
+
+    setIsSavingJob(true)
+    setEditError('')
+
+    try {
+      const res = await fetchWithAuth(`/jobs/${editingJob.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to update job')
+      }
+
+      applyJobUpdate(editingJob.id, {
+        name: updates.name,
+        phone: updates.phone,
+        address: updates.address,
+        job_type: updates.jobType,
+        job_date: updates.jobDate,
+        start_time: updates.startTime,
+        status: updates.status,
+        payment: updates.payment,
+        comments: updates.comments
+      })
+      closeEditJob()
+    } catch (err) {
+      console.error('Error updating calendar job:', err)
+      setEditError(err.message || 'Unable to update job')
+    } finally {
+      setIsSavingJob(false)
+    }
+  }
+
   const renderDailyView = () => {
     const dayJobs = jobsByDate.get(getDateKey(anchorDate)) || []
+    const { scheduledJobs, unscheduledJobs, timelineStartMinutes, visibleHourCount, timeSlots } = buildDayTimeline(dayJobs)
+    const timelineHeight = visibleHourCount * DAY_TIMELINE_ROW_HEIGHT
 
     return (
       <div className="calendar-day-view">
@@ -296,11 +564,78 @@ export default function CalendarPage({ currentUser }) {
               <p>No jobs are scheduled for this day.</p>
             </div>
           ) : (
-            <div className="calendar-agenda-list">
-              {dayJobs.map((job) => (
-                <CalendarJobCard key={job.id} job={job} onClick={openJobDetails} />
-              ))}
-            </div>
+            <>
+              {scheduledJobs.length > 0 ? (
+                <div
+                  className="calendar-day-timeline-shell"
+                  style={{
+                    '--calendar-timeline-rows': visibleHourCount,
+                    '--calendar-timeline-row-height': `${DAY_TIMELINE_ROW_HEIGHT}px`
+                  }}
+                >
+                  <div className="calendar-time-rail" aria-hidden="true">
+                    {timeSlots.map((slotMinutes) => (
+                      <div key={`label-${slotMinutes}`} className="calendar-time-label">
+                        {formatTimelineLabel(slotMinutes)}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="calendar-time-grid-wrap">
+                    <div className="calendar-time-grid">
+                      {timeSlots.map((slotMinutes) => (
+                        <div key={`row-${slotMinutes}`} className="calendar-time-grid-row" />
+                      ))}
+
+                      <div className="calendar-time-grid-overlay" style={{ height: `${timelineHeight}px` }}>
+                        {scheduledJobs.map(({ job, startMinutes, endMinutes, columnIndex, columnCount }) => {
+                          const topOffset = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT
+                          const durationMinutes = Math.max(endMinutes - startMinutes, DEFAULT_JOB_DURATION_MINUTES)
+                          const eventHeight = Math.max((durationMinutes / 60) * DAY_TIMELINE_ROW_HEIGHT, 56)
+                          const columnWidth = 100 / columnCount
+                          const leftOffset = columnIndex * columnWidth
+
+                          return (
+                          <CalendarJobCard
+                              key={job.id}
+                              job={job}
+                              onClick={openJobDetails}
+                              onEdit={openEditJob}
+                              className="calendar-job-pill--timeline"
+                              showMeta
+                              style={{
+                                top: `${topOffset}px`,
+                                height: `${eventHeight}px`,
+                                left: `calc(${leftOffset}% + ${DAY_TIMELINE_EVENT_GAP / 2}px)`,
+                                width: `calc(${columnWidth}% - ${DAY_TIMELINE_EVENT_GAP}px)`
+                              }}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="calendar-empty-panel calendar-empty-panel--compact">
+                  <p>No jobs on this day have a start time yet.</p>
+                </div>
+              )}
+
+              {unscheduledJobs.length > 0 && (
+                <div className="calendar-day-secondary-list">
+                  <div className="calendar-day-secondary-header">
+                    <h5>Need a timeslot</h5>
+                    <span>{unscheduledJobs.length} without a start time</span>
+                  </div>
+                  <div className="calendar-agenda-list calendar-agenda-list--secondary">
+                    {unscheduledJobs.map((job) => (
+                      <CalendarJobCard key={job.id} job={job} onClick={openJobDetails} onEdit={openEditJob} compact />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -552,7 +887,7 @@ export default function CalendarPage({ currentUser }) {
             <div className="comments-modal-header">
               <h3>{selectedJob.name}</h3>
               <p className="comments-modal-subtitle">
-                {selectedJob.job_type} - {formatFullDate(selectedJob.job_date)} - {formatTimeRange(selectedJob.start_time)}
+                {formatFullDate(selectedJob.job_date)} - {formatTimeRange(selectedJob.start_time)}
               </p>
             </div>
 
@@ -586,6 +921,16 @@ export default function CalendarPage({ currentUser }) {
             <div className="comments-modal-actions">
               <button
                 type="button"
+                className="comments-modal-button comments-modal-button--primary"
+                onClick={() => {
+                  openEditJob(selectedJob)
+                  closeJobDetails()
+                }}
+              >
+                Edit job
+              </button>
+              <button
+                type="button"
                 className="comments-modal-button comments-modal-button--ghost"
                 onClick={closeJobDetails}
               >
@@ -594,6 +939,18 @@ export default function CalendarPage({ currentUser }) {
             </div>
           </div>
         </div>
+      )}
+
+      {editingJob && (
+        <JobEditorModal
+          key={editingJob.id}
+          job={editingJob}
+          clients={clients}
+          saving={isSavingJob}
+          error={editError}
+          onClose={closeEditJob}
+          onSave={saveJobEdits}
+        />
       )}
     </div>
   )
