@@ -19,7 +19,7 @@ const buildFormState = (job) => ({
   comments: job?.comments || ''
 })
 
-export default function JobEditorModal({ job, clients = [], saving, error, onClose, onSave }) {
+export default function JobEditorModal({ job, clients = [], saving, deleting = false, error, onClose, onSave, onDelete }) {
   const [formData, setFormData] = useState(() => buildFormState(job))
   const [fieldErrors, setFieldErrors] = useState({})
   const [suggestionField, setSuggestionField] = useState(null)
@@ -302,18 +302,28 @@ export default function JobEditorModal({ job, clients = [], saving, error, onClo
               type="button"
               className="comments-modal-button comments-modal-button--ghost"
               onClick={onClose}
-              disabled={saving}
+              disabled={saving || deleting}
             >
               Cancel
             </button>
             <button
               type="submit"
               className="comments-modal-button comments-modal-button--primary"
-              disabled={saving}
+              disabled={saving || deleting}
             >
               {saving ? 'Saving...' : 'Save changes'}
             </button>
           </div>
+          {onDelete ? (
+            <button
+              type="button"
+              className="comments-modal-button comments-modal-button--danger job-editor-delete"
+              onClick={() => onDelete(job)}
+              disabled={saving || deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete job'}
+            </button>
+          ) : null}
         </form>
       </div>
     </div>

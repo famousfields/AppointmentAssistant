@@ -45,6 +45,7 @@ export default function ClientsList({ currentUser }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [editingJob, setEditingJob] = useState(null)
   const [isSavingJob, setIsSavingJob] = useState(false)
+  const [isDeletingJob, setIsDeletingJob] = useState(false)
   const [editError, setEditError] = useState('')
   const { fetchWithAuth } = useApi()
 
@@ -119,6 +120,11 @@ export default function ClientsList({ currentUser }) {
     )
   }
 
+  const removeJob = (jobId) => {
+    setJobs((prev) => prev.filter((job) => job.id !== jobId))
+    setEditingJob((current) => (current?.id === jobId ? null : current))
+  }
+
   const saveJobEdits = async (updates) => {
     if (!editingJob) return
 
@@ -156,6 +162,36 @@ export default function ClientsList({ currentUser }) {
       setEditError(err.message || 'Unable to update job')
     } finally {
       setIsSavingJob(false)
+    }
+  }
+
+  const deleteJob = async (job) => {
+    if (!job) return
+
+    const confirmed = window.confirm(
+      `Delete the ${job.job_type} job for ${job.name}? This cannot be undone.`
+    )
+    if (!confirmed) return
+
+    setIsDeletingJob(true)
+    setEditError('')
+
+    try {
+      const res = await fetchWithAuth(`/jobs/${job.id}`, {
+        method: 'DELETE'
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to delete job')
+      }
+
+      removeJob(job.id)
+    } catch (err) {
+      console.error('Error deleting job from clients page:', err)
+      setEditError(err.message || 'Unable to delete job')
+    } finally {
+      setIsDeletingJob(false)
     }
   }
 
@@ -283,16 +319,26 @@ export default function ClientsList({ currentUser }) {
                     <td>{formatCurrency(job.payment)}</td>
                     <td>{job.comments || 'No notes yet'}</td>
                     <td>
-                      <button
-                        type="button"
-                        className="comments-button"
-                        onClick={() => {
-                          setEditingJob(job)
-                          setEditError('')
-                        }}
-                      >
-                        Edit job
-                      </button>
+                      <div className="table-actions">
+                        <button
+                          type="button"
+                          className="comments-button"
+                          onClick={() => {
+                            setEditingJob(job)
+                            setEditError('')
+                          }}
+                        >
+                          Edit job
+                        </button>
+                        <button
+                          type="button"
+                          className="comments-button comments-button--danger"
+                          onClick={() => deleteJob(job)}
+                          disabled={isDeletingJob}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -307,9 +353,11 @@ export default function ClientsList({ currentUser }) {
         job={editingJob}
         clients={clients}
         saving={isSavingJob}
+        deleting={isDeletingJob}
         error={editError}
         onClose={closeEditModal}
         onSave={saveJobEdits}
+        onDelete={deleteJob}
       />
     </div>
   )

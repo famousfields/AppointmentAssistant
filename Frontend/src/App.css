@@ -881,6 +881,16 @@
   background: var(--bg-row);
 }
 
+.calendar-day--button {
+  width: 100%;
+  border-left: 0;
+  border-top: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 .calendar-day:nth-child(7n) {
   border-right: 0;
 }
@@ -901,6 +911,19 @@
 .calendar-day-number {
   color: var(--text-heading);
   font-weight: 800;
+}
+
+.calendar-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.calendar-day-count {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .calendar-day-jobs {
@@ -969,6 +992,13 @@
 
 .calendar-job-pill-meta {
   opacity: 0.9;
+}
+
+.calendar-day-summary {
+  color: var(--text-heading);
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .calendar-job-pill--editable .calendar-job-pill-main {
@@ -1210,6 +1240,19 @@
   cursor: pointer;
 }
 
+.comments-button--danger,
+.comments-modal-button--danger {
+  border-color: rgba(251, 113, 133, 0.42);
+  background: rgba(251, 113, 133, 0.14);
+  color: var(--text-heading);
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .comments-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1264,6 +1307,11 @@
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.job-editor-delete {
+  width: 100%;
+  margin-top: 12px;
 }
 
 .clients-page {

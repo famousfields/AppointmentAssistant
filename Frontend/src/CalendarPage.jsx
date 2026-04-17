@@ -13,12 +13,12 @@ const CALENDAR_VIEWS = [
 ]
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const MAX_VISIBLE_JOBS_PER_DAY = 3
 const DAY_TIMELINE_DEFAULT_START_HOUR = 8
 const DAY_TIMELINE_DEFAULT_END_HOUR = 18
 const DAY_TIMELINE_MIN_VISIBLE_HOURS = 8
 const DAY_TIMELINE_ROW_HEIGHT = 76
 const DAY_TIMELINE_EVENT_GAP = 12
+const DAY_TIMELINE_EVENT_HEIGHT_REDUCTION = 12
 const DEFAULT_JOB_DURATION_MINUTES = 60
 
 const startOfDay = (value) => {
@@ -107,6 +107,12 @@ const formatTimelineLabel = (totalMinutes) =>
     hour: 'numeric'
   })
 
+const formatClockTime = (totalMinutes) =>
+  new Date(2000, 0, 1, Math.floor(totalMinutes / 60), totalMinutes % 60).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+
 const formatFullDate = (dateString) => {
   const date = parseDateValue(dateString)
   if (!date) return '-'
@@ -136,6 +142,27 @@ const formatTimeRange = (timeValue) => {
     hour: 'numeric',
     minute: '2-digit'
   })}`
+}
+
+const getMonthDaySummary = (dayJobs) => {
+  if (dayJobs.length === 0) return 'Open'
+
+  const scheduledTimes = dayJobs
+    .map((job) => parseTimeToMinutes(job.start_time))
+    .filter((time) => time !== null)
+
+  if (scheduledTimes.length === 0) {
+    return `${dayJobs.length} job${dayJobs.length === 1 ? '' : 's'} without a time`
+  }
+
+  const earliestStart = Math.min(...scheduledTimes)
+  const latestStart = Math.max(...scheduledTimes)
+
+  if (scheduledTimes.length === 1 && dayJobs.length === 1) {
+    return `1 job at ${formatClockTime(earliestStart)}`
+  }
+
+  return `${dayJobs.length} jobs from ${formatClockTime(earliestStart)} to ${formatClockTime(latestStart)}`
 }
 
 const buildMonthGrid = (visibleDate) => {
@@ -279,8 +306,8 @@ const buildDayTimeline = (dayJobs) => {
     const earliestStartMinutes = Math.min(...scheduledJobs.map((item) => item.startMinutes))
     const latestEndMinutes = Math.max(...scheduledJobs.map((item) => item.endMinutes))
 
-    startHour = clamp(Math.floor((earliestStartMinutes - 60) / 60), 0, 23)
-    endHour = clamp(Math.ceil((latestEndMinutes + 60) / 60), 1, 24)
+    startHour = clamp(Math.floor(earliestStartMinutes / 60), 0, 23)
+    endHour = clamp(Math.ceil(latestEndMinutes / 60), 1, 24)
 
     if (endHour - startHour < DAY_TIMELINE_MIN_VISIBLE_HOURS) {
       if (startHour <= DAY_TIMELINE_DEFAULT_START_HOUR) {
@@ -350,6 +377,7 @@ export default function CalendarPage({ currentUser }) {
   const [selectedJob, setSelectedJob] = useState(null)
   const [editingJob, setEditingJob] = useState(null)
   const [isSavingJob, setIsSavingJob] = useState(false)
+  const [isDeletingJob, setIsDeletingJob] = useState(false)
   const [editError, setEditError] = useState('')
   const [calendarView, setCalendarView] = useState('day')
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()))
@@ -496,6 +524,12 @@ export default function CalendarPage({ currentUser }) {
     })
   }
 
+  const removeJob = (jobId) => {
+    setJobs((prev) => prev.filter((job) => job.id !== jobId))
+    setSelectedJob((current) => (current?.id === jobId ? null : current))
+    setEditingJob((current) => (current?.id === jobId ? null : current))
+  }
+
   const saveJobEdits = async (updates) => {
     if (!editingJob) return
 
@@ -533,6 +567,36 @@ export default function CalendarPage({ currentUser }) {
       setEditError(err.message || 'Unable to update job')
     } finally {
       setIsSavingJob(false)
+    }
+  }
+
+  const deleteJob = async (job) => {
+    if (!job) return
+
+    const confirmed = window.confirm(
+      `Delete the ${job.job_type} job for ${job.name}? This cannot be undone.`
+    )
+    if (!confirmed) return
+
+    setIsDeletingJob(true)
+    setEditError('')
+
+    try {
+      const res = await fetchWithAuth(`/jobs/${job.id}`, {
+        method: 'DELETE'
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to delete job')
+      }
+
+      removeJob(job.id)
+    } catch (err) {
+      console.error('Error deleting calendar job:', err)
+      setEditError(err.message || 'Unable to delete job')
+    } finally {
+      setIsDeletingJob(false)
     }
   }
 
@@ -589,9 +653,14 @@ export default function CalendarPage({ currentUser }) {
 
                       <div className="calendar-time-grid-overlay" style={{ height: `${timelineHeight}px` }}>
                         {scheduledJobs.map(({ job, startMinutes, endMinutes, columnIndex, columnCount }) => {
-                          const topOffset = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT
+                          const topOffset = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT-DEFAULT_JOB_DURATION_MINUTES / 60 * DAY_TIMELINE_ROW_HEIGHT
                           const durationMinutes = Math.max(endMinutes - startMinutes, DEFAULT_JOB_DURATION_MINUTES)
-                          const eventHeight = Math.max((durationMinutes / 60) * DAY_TIMELINE_ROW_HEIGHT, 56)
+                          const eventHeight = Math.max(
+                            (durationMinutes / 60) * DAY_TIMELINE_ROW_HEIGHT,
+                            44
+                          )
+                          const topAdjustment =
+                            startMinutes === timelineStartMinutes ? 0 : DAY_TIMELINE_EVENT_HEIGHT_REDUCTION
                           const columnWidth = 100 / columnCount
                           const leftOffset = columnIndex * columnWidth
 
@@ -604,7 +673,7 @@ export default function CalendarPage({ currentUser }) {
                               className="calendar-job-pill--timeline"
                               showMeta
                               style={{
-                                top: `${topOffset}px`,
+                                top: `${Math.max(topOffset - topAdjustment, 0)}px`,
                                 height: `${eventHeight}px`,
                                 left: `calc(${leftOffset}% + ${DAY_TIMELINE_EVENT_GAP / 2}px)`,
                                 width: `calc(${columnWidth}% - ${DAY_TIMELINE_EVENT_GAP}px)`
@@ -694,26 +763,30 @@ export default function CalendarPage({ currentUser }) {
           {monthDays.map((date) => {
             const dateKey = getDateKey(date)
             const dayJobs = jobsByDate.get(dateKey) || []
-            const visibleJobs = dayJobs.slice(0, MAX_VISIBLE_JOBS_PER_DAY)
-            const remainingJobs = dayJobs.length - visibleJobs.length
 
             return (
-              <div
+              <button
                 key={dateKey}
+                type="button"
                 className={`calendar-day${
                   date.getMonth() !== currentMonth ? ' calendar-day--outside' : ''
-                }${dateKey === todayKey ? ' calendar-day--today' : ''}`}
+                }${dateKey === todayKey ? ' calendar-day--today' : ''} calendar-day--button`}
+                onClick={() => {
+                  setAnchorDate(date)
+                  setCalendarView('day')
+                }}
               >
-                <div className="calendar-day-number">{date.getDate()}</div>
-                <div className="calendar-day-jobs">
-                  {visibleJobs.map((job) => (
-                    <CalendarJobCard key={job.id} job={job} onClick={openJobDetails} compact />
-                  ))}
-                  {remainingJobs > 0 && (
-                    <p className="calendar-day-more">+{remainingJobs} more</p>
-                  )}
+                <div className="calendar-day-header">
+                  <div className="calendar-day-number">{date.getDate()}</div>
+                  <div className="calendar-day-count">
+                    {dayJobs.length} job{dayJobs.length === 1 ? '' : 's'}
+                  </div>
                 </div>
-              </div>
+                <div className="calendar-day-jobs">
+                  <p className="calendar-day-summary">{getMonthDaySummary(dayJobs)}</p>
+                  {dayJobs.length > 0 ? <p className="calendar-day-more">Open day view</p> : null}
+                </div>
+              </button>
             )
           })}
         </div>
@@ -931,6 +1004,14 @@ export default function CalendarPage({ currentUser }) {
               </button>
               <button
                 type="button"
+                className="comments-modal-button comments-modal-button--danger"
+                onClick={() => deleteJob(selectedJob)}
+                disabled={isDeletingJob}
+              >
+                {isDeletingJob ? 'Deleting...' : 'Delete job'}
+              </button>
+              <button
+                type="button"
                 className="comments-modal-button comments-modal-button--ghost"
                 onClick={closeJobDetails}
               >
@@ -947,9 +1028,11 @@ export default function CalendarPage({ currentUser }) {
           job={editingJob}
           clients={clients}
           saving={isSavingJob}
+          deleting={isDeletingJob}
           error={editError}
           onClose={closeEditJob}
           onSave={saveJobEdits}
+          onDelete={deleteJob}
         />
       )}
     </div>
