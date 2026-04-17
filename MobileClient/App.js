@@ -25,6 +25,7 @@ import {
   persistJobDraft,
   persistSession
 } from './src/api'
+import GoogleMapsLink from './src/GoogleMapsLink'
 import { colors, commonStyles } from './src/theme'
 
 const NAV_ITEMS = [
@@ -1337,7 +1338,7 @@ export default function App() {
                 setJobErrors((current) => ({ ...current, address: '' }))
                 setJobStatus(null)
                 setJobSuggestionField('address')
-              }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={jobForm.address} />} helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
               <ClientSuggestions
                 clients={clients}
                 query={jobForm.address}
@@ -1480,11 +1481,12 @@ function Panel({ title, subtitle, children }) {
   )
 }
 
-function FormField({ label, error, helperText, multiline, ...props }) {
+function FormField({ label, error, helperText, belowInput = null, multiline, ...props }) {
   return (
     <View>
       <Text style={commonStyles.label}>{label}</Text>
       <TextInput style={[commonStyles.input, multiline ? styles.multiline : null]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
+      {belowInput}
       {helperText ? <Text style={commonStyles.helperText}>{helperText}</Text> : null}
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
     </View>
@@ -1867,7 +1869,7 @@ function ClientModal({ client, clients, onClose, onSave }) {
               <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => {
                 setFormState((current) => ({ ...current, address: value }))
                 setSuggestionField('address')
-              }} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              }} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={formState?.address || ''} />} helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
               <ClientSuggestions
                 clients={clients}
                 query={formState?.address || ''}
@@ -1984,7 +1986,7 @@ function JobModal({ job, clients, onClose, onSave, onDelete }) {
               <FormField label="Address" value={formState?.address || ''} onChangeText={(value) => {
                 setFormState((current) => ({ ...current, address: value }))
                 setSuggestionField('address')
-              }} placeholder="123 Main St, Springfield, IL 62704" helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+              }} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={formState?.address || ''} />} helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
               <ClientSuggestions
                 clients={clients}
                 query={formState?.address || ''}

@@ -5,6 +5,7 @@ import { JOB_TYPE_OPTIONS } from './jobTypes'
 import ClientSuggestions from './ClientSuggestions'
 import { applyClientSuggestion, buildClients, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
 import { parseDateValue } from './dateUtils'
+import GoogleMapsLink from './GoogleMapsLink'
 
 const EMPTY_FORM_DATA = {
   name: '',
@@ -328,6 +329,7 @@ export default function JobForm({ currentUser }) {
           value={formData.address}
           placeholder="123 Main St, Springfield, IL 62704"
         />
+        <GoogleMapsLink address={formData.address} />
         <div className="form-hint">Include street, city, and any unit details so the crew can find the appointment quickly.</div>
         {errors.address && <div className="form-error">{errors.address}</div>}
       </div>
