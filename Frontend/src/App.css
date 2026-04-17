@@ -372,6 +372,39 @@
   background: rgba(15, 23, 42, 1);
 }
 
+.maps-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin-top: 2px;
+  padding: 9px 12px;
+  border: 1px solid rgba(109, 124, 255, 0.3);
+  border-radius: 14px;
+  background: rgba(109, 124, 255, 0.12);
+  color: var(--text-heading);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 700;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.maps-link-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(109, 124, 255, 0.42);
+  background: rgba(109, 124, 255, 0.18);
+}
+
+.maps-link-button__icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.maps-link-button__icon path {
+  vector-effect: non-scaling-stroke;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

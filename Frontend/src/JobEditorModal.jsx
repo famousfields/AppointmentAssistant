@@ -3,6 +3,7 @@ import ClientSuggestions from './ClientSuggestions'
 import { applyClientSuggestion, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
 import { formatDateInputValue, parseDateValue } from './dateUtils'
 import { JOB_TYPE_OPTIONS } from './jobTypes'
+import GoogleMapsLink from './GoogleMapsLink'
 
 const STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
 const PHONE_EXAMPLE = '(555) 123-4567'
@@ -173,6 +174,7 @@ export default function JobEditorModal({ job, clients = [], saving, deleting = f
               placeholder="123 Main St, Springfield, IL 62704"
               autoComplete="street-address"
             />
+            <GoogleMapsLink address={formData.address} />
             <p className="form-hint">Include street, city, and any unit details so the crew can find the appointment quickly.</p>
             {fieldErrors.address && <p className="form-error">{fieldErrors.address}</p>}
           </div>
