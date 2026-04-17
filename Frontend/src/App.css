@@ -804,7 +804,7 @@
   inset: 0;
 }
 
-.calendar-job-pill--timeline {
+S.calendar-job-pill--timeline {
   position: absolute;
   min-width: 0;
   display: flex;
@@ -1231,22 +1231,12 @@
 
 .job-editor-modal {
   width: min(100%, 680px);
-  max-height: calc(100dvh - 48px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .job-editor-form {
   margin-top: 18px;
-  flex: 1 1 auto;
   display: grid;
   gap: 14px;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 6px;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
 }
 
 .comments-modal-header {
