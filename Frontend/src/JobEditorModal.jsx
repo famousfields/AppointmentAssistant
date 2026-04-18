@@ -2,7 +2,7 @@ import { useState } from 'react'
 import ClientSuggestions from './ClientSuggestions'
 import { applyClientSuggestion, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
 import { formatDateInputValue, parseDateValue } from './dateUtils'
-import { JOB_TYPE_OPTIONS } from './jobTypes'
+import { buildJobTypeSuggestionSet } from './jobTypes'
 import GoogleMapsLink from './GoogleMapsLink'
 
 const STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
@@ -20,10 +20,11 @@ const buildFormState = (job) => ({
   comments: job?.comments || ''
 })
 
-export default function JobEditorModal({ job, clients = [], saving, deleting = false, error, onClose, onSave, onDelete }) {
+export default function JobEditorModal({ job, clients = [], jobTypes = [], saving, deleting = false, error, onClose, onSave, onDelete }) {
   const [formData, setFormData] = useState(() => buildFormState(job))
   const [fieldErrors, setFieldErrors] = useState({})
   const [suggestionField, setSuggestionField] = useState(null)
+  const jobTypeSuggestions = buildJobTypeSuggestionSet(jobTypes)
 
   if (!job) return null
 
@@ -192,23 +193,23 @@ export default function JobEditorModal({ job, clients = [], saving, deleting = f
 
           <div className="form-group">
             <label htmlFor="edit-job-type">Job type</label>
-            <select
+            <input
               id="edit-job-type"
               name="jobType"
-              className="jobs-status-select"
+              list="edit-job-type-options"
               value={formData.jobType}
               onChange={(event) => {
                 handleChange(event)
                 setSuggestionField(null)
               }}
-            >
-              <option value="">Select a job type</option>
-              {JOB_TYPE_OPTIONS.map((jobType) => (
-                <option key={jobType} value={jobType}>
-                  {jobType}
-                </option>
+              placeholder="Mulch installation"
+            />
+            <datalist id="edit-job-type-options">
+              {jobTypeSuggestions.map((jobType) => (
+                <option key={jobType} value={jobType} />
               ))}
-            </select>
+            </datalist>
+            <p className="form-hint">Job types are business-specific. New names are accepted and can be given a color in the Job Types panel.</p>
             {fieldErrors.jobType && <p className="form-error">{fieldErrors.jobType}</p>}
           </div>
 

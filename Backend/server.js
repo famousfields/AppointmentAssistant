@@ -14,8 +14,15 @@ const {
 const { body, validationResult } = require("express-validator");
 
 const app = express();
-const JOB_TYPE_OPTIONS = ["0 Turn Mower", "Push Mower", "Riding Mower", "Pressure Washer"];
 const START_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const JOB_TYPE_NAME_PATTERN = /^.{2,120}$/;
+const JOB_TYPE_COLOR_PATTERN = /^#([0-9a-fA-F]{6})$/;
+const DEFAULT_JOB_TYPES = [
+  { name: "0 Turn Mower", color: "#22c55e", sortOrder: 0 },
+  { name: "Push Mower", color: "#f97316", sortOrder: 1 },
+  { name: "Riding Mower", color: "#3b82f6", sortOrder: 2 },
+  { name: "Pressure Washer", color: "#06b6d4", sortOrder: 3 }
+];
 
 const ACCESS_TOKEN_TTL_MS = Number.parseInt(process.env.ACCESS_TOKEN_TTL_MS || `${15 * 60 * 1000}`, 10);
 const REFRESH_TOKEN_TTL_DAYS = Number.parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || "14", 10);
@@ -137,6 +144,141 @@ const rotateRefreshToken = async (user, currentToken) => {
   }
 };
 
+const normalizeJobTypeName = (value) => String(value || "").trim();
+
+const normalizeJobTypeKey = (value) => normalizeJobTypeName(value).toLowerCase();
+
+const normalizeHexColor = (value) => {
+  const trimmed = String(value || "").trim();
+  return JOB_TYPE_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : "";
+};
+
+const buildColorFromName = (value) => {
+  const normalized = normalizeJobTypeKey(value);
+  let hash = 0;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+  }
+
+  const red = 96 + (hash & 0x3f);
+  const green = 96 + ((hash >> 6) & 0x3f);
+  const blue = 96 + ((hash >> 12) & 0x3f);
+
+  return `#${[red, green, blue]
+    .map((channel) => channel.toString(16).padStart(2, "0"))
+    .join("")}`;
+};
+
+const seedDefaultJobTypesForUser = async (userId) => {
+  const values = DEFAULT_JOB_TYPES.map((type) => [
+    userId,
+    type.name,
+    normalizeJobTypeKey(type.name),
+    type.color,
+    type.sortOrder
+  ]);
+
+  await db.promise().query(
+    `
+      INSERT IGNORE INTO job_types (user_id, name, normalized_name, color, sort_order)
+      VALUES ?
+    `,
+    [values]
+  );
+};
+
+const fetchJobTypeById = async (userId, jobTypeId) => {
+  const [[row]] = await db.promise().query(
+    `
+      SELECT id, user_id, name, normalized_name, color, sort_order
+      FROM job_types
+      WHERE id = ? AND user_id = ?
+      LIMIT 1
+    `,
+    [jobTypeId, userId]
+  );
+
+  return row || null;
+};
+
+const fetchJobTypeByName = async (userId, jobTypeName) => {
+  const normalizedName = normalizeJobTypeKey(jobTypeName);
+  if (!normalizedName) return null;
+
+  const [[row]] = await db.promise().query(
+    `
+      SELECT id, user_id, name, normalized_name, color, sort_order
+      FROM job_types
+      WHERE user_id = ? AND normalized_name = ?
+      LIMIT 1
+    `,
+    [userId, normalizedName]
+  );
+
+  return row || null;
+};
+
+const ensureJobTypeForJob = async (userId, payload) => {
+  const jobTypeId = payload.jobTypeId ? Number(payload.jobTypeId) : null;
+  const jobTypeName = normalizeJobTypeName(payload.jobType);
+  const jobTypeColor = normalizeHexColor(payload.jobTypeColor);
+
+  if (jobTypeId) {
+    const row = await fetchJobTypeById(userId, jobTypeId);
+    if (!row) {
+      const error = new Error("Job type not found");
+      error.statusCode = 400;
+      throw error;
+    }
+    return row;
+  }
+
+  if (!jobTypeName) {
+    const error = new Error("Job type is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const existing = await fetchJobTypeByName(userId, jobTypeName);
+  if (existing) {
+    return existing;
+  }
+
+  const color = jobTypeColor || buildColorFromName(jobTypeName);
+  const sortOrder = await getNextJobTypeSortOrder(userId);
+
+  const [result] = await db.promise().query(
+    `
+      INSERT INTO job_types (user_id, name, normalized_name, color, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+    [userId, jobTypeName, normalizeJobTypeKey(jobTypeName), color, sortOrder]
+  );
+
+  return {
+    id: result.insertId,
+    user_id: userId,
+    name: jobTypeName,
+    normalized_name: normalizeJobTypeKey(jobTypeName),
+    color,
+    sort_order: sortOrder
+  };
+};
+
+const getNextJobTypeSortOrder = async (userId) => {
+  const [[row]] = await db.promise().query(
+    `
+      SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order
+      FROM job_types
+      WHERE user_id = ?
+    `,
+    [userId]
+  );
+
+  return Number(row?.next_sort_order ?? 0);
+};
+
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -171,6 +313,8 @@ app.options("/auth/logout", cors(corsOptions));
 app.options("/jobs", cors(corsOptions));
 app.options("/jobs/:id", cors(corsOptions));
 app.options("/jobs/:id/comments", cors(corsOptions));
+app.options("/job-types", cors(corsOptions));
+app.options("/job-types/:id", cors(corsOptions));
 app.options("/clients/:id", cors(corsOptions));
 app.use(express.json());
 app.use(
@@ -233,7 +377,10 @@ app.post(
         VALUES (?, ?, ?, NOW())
       `;
 
-      await db.promise().query(insertQuery, [username, email, hashedPassword]);
+      const [insertResult] = await db.promise().query(insertQuery, [username, email, hashedPassword]);
+      if (insertResult?.insertId) {
+        await seedDefaultJobTypesForUser(insertResult.insertId);
+      }
       return res.status(201).json({ message: "Account created successfully" });
     } catch (err) {
       console.error("Error creating user:", err);
@@ -360,10 +507,8 @@ app.post(
       return true;
     }),
     body("address").trim().isLength({ min: 5 }).withMessage("Address must be at least 5 characters"),
-    body("jobType")
-      .trim()
-      .isIn(JOB_TYPE_OPTIONS)
-      .withMessage(`Job type must be one of: ${JOB_TYPE_OPTIONS.join(", ")}`),
+    body("jobTypeId").optional({ values: "falsy" }).isInt({ min: 1 }).withMessage("Job type is required"),
+    body("jobType").optional().trim().isLength({ min: 2 }).withMessage("Job type is required"),
     body("jobDate")
       .isISO8601()
       .withMessage("Invalid date")
@@ -381,14 +526,21 @@ app.post(
       .isFloat({ min: 0 })
       .withMessage("Payment must be a number greater than or equal to 0")
   ],
-  (req, res) => {
+  async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { name, phone, address, jobType, jobDate, startTime, comments, payment } = req.body;
+    const { name, phone, address, jobDate, startTime, comments, payment } = req.body;
     const normalizedPayment = Number.parseFloat(payment ?? 0);
     const normalizedStartTime = `${startTime}:00`;
     const userId = req.user.id;
+    let jobType;
+
+    try {
+      jobType = await ensureJobTypeForJob(userId, req.body);
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({ error: error.message || "Invalid job type" });
+    }
 
     const getClientQuery = `
       SELECT id FROM Clients
@@ -422,12 +574,22 @@ app.post(
 
       function insertJob(clientId) {
         const jobQuery = `
-        INSERT INTO Jobs (client_id, job_type, job_date, start_time, comments, status, payment, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Jobs (client_id, job_type_id, job_type, job_date, start_time, comments, status, payment, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
         db.query(
           jobQuery,
-          [clientId, jobType, jobDate, normalizedStartTime, comments, "Pending", normalizedPayment, userId],
+          [
+            clientId,
+            jobType.id,
+            jobType.name,
+            jobDate,
+            normalizedStartTime,
+            comments,
+            "Pending",
+            normalizedPayment,
+            userId
+          ],
           (insertJobErr, result) => {
             if (insertJobErr) {
               console.error("Error inserting job:", insertJobErr);
@@ -444,10 +606,12 @@ app.post(
 
 app.get("/jobs", requireAuth, (req, res) => {
   const query = `
-    SELECT j.id, j.job_type, j.job_date, j.start_time, j.comments, j.status, j.payment,
+    SELECT j.id, j.job_type_id, COALESCE(jt.name, j.job_type) AS job_type, jt.color AS job_type_color,
+           j.job_date, j.start_time, j.comments, j.status, j.payment,
            c.id AS client_id, c.name, c.phone, c.address
     FROM Jobs j
     JOIN Clients c ON j.client_id = c.id
+    LEFT JOIN job_types jt ON jt.id = j.job_type_id AND jt.user_id = j.user_id
     WHERE j.user_id = ?
     ORDER BY j.job_date DESC, j.start_time ASC
     `;
@@ -488,6 +652,161 @@ app.patch("/jobs/:id/comments", requireAuth, (req, res) => {
   });
 });
 
+app.get("/job-types", requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.promise().query(
+      `
+        SELECT id, name, color, sort_order, created_at, updated_at
+        FROM job_types
+        WHERE user_id = ?
+        ORDER BY sort_order ASC, name ASC
+      `,
+      [req.user.id]
+    );
+
+    return res.json(rows);
+  } catch (error) {
+    console.error("Error fetching job types:", error);
+    return res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.post(
+  "/job-types",
+  requireAuth,
+  [
+    body("name").trim().isLength({ min: 2, max: 120 }).withMessage("Job type name must be 2-120 characters"),
+    body("color").optional().trim().isHexColor().withMessage("Color must be a valid hex color"),
+    body("sortOrder").optional().isInt({ min: 0 }).withMessage("Sort order must be a positive number")
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const name = normalizeJobTypeName(req.body.name);
+    const normalizedName = normalizeJobTypeKey(name);
+    const color = normalizeHexColor(req.body.color) || buildColorFromName(name);
+    const sortOrder =
+      req.body.sortOrder !== undefined && req.body.sortOrder !== null
+        ? Number(req.body.sortOrder)
+        : await getNextJobTypeSortOrder(req.user.id);
+
+    try {
+      const existing = await fetchJobTypeByName(req.user.id, name);
+      if (existing) {
+        return res.status(409).json({ error: "Job type already exists" });
+      }
+
+      const [result] = await db.promise().query(
+        `
+          INSERT INTO job_types (user_id, name, normalized_name, color, sort_order)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        [req.user.id, name, normalizedName, color, sortOrder]
+      );
+
+      const created = await fetchJobTypeById(req.user.id, result.insertId);
+      return res.status(201).json(created);
+    } catch (error) {
+      console.error("Error creating job type:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        return res.status(409).json({ error: "Job type already exists" });
+      }
+      return res.status(500).json({ error: "Database error" });
+    }
+  }
+);
+
+app.put(
+  "/job-types/:id",
+  requireAuth,
+  [
+    body("name").trim().isLength({ min: 2, max: 120 }).withMessage("Job type name must be 2-120 characters"),
+    body("color").optional().trim().isHexColor().withMessage("Color must be a valid hex color"),
+    body("sortOrder").optional().isInt({ min: 0 }).withMessage("Sort order must be a positive number")
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const jobTypeId = Number(req.params.id);
+    if (Number.isNaN(jobTypeId)) {
+      return res.status(400).json({ error: "Invalid job type ID" });
+    }
+
+    const existing = await fetchJobTypeById(req.user.id, jobTypeId);
+    if (!existing) {
+      return res.status(404).json({ error: "Job type not found" });
+    }
+
+    const name = normalizeJobTypeName(req.body.name);
+    const normalizedName = normalizeJobTypeKey(name);
+    const color = normalizeHexColor(req.body.color) || existing.color;
+    const sortOrder =
+      req.body.sortOrder !== undefined && req.body.sortOrder !== null
+        ? Number(req.body.sortOrder)
+        : existing.sort_order;
+
+    try {
+      const duplicate = await fetchJobTypeByName(req.user.id, name);
+      if (duplicate && duplicate.id !== jobTypeId) {
+        return res.status(409).json({ error: "Job type already exists" });
+      }
+
+      await db.promise().query(
+        `
+          UPDATE job_types
+          SET name = ?, normalized_name = ?, color = ?, sort_order = ?
+          WHERE id = ? AND user_id = ?
+        `,
+        [name, normalizedName, color, sortOrder, jobTypeId, req.user.id]
+      );
+
+      const updated = await fetchJobTypeById(req.user.id, jobTypeId);
+      return res.json(updated);
+    } catch (error) {
+      console.error("Error updating job type:", error);
+      if (error.code === "ER_DUP_ENTRY") {
+        return res.status(409).json({ error: "Job type already exists" });
+      }
+      return res.status(500).json({ error: "Database error" });
+    }
+  }
+);
+
+app.delete("/job-types/:id", requireAuth, async (req, res) => {
+  const jobTypeId = Number(req.params.id);
+  if (Number.isNaN(jobTypeId)) {
+    return res.status(400).json({ error: "Invalid job type ID" });
+  }
+
+  try {
+    const jobType = await fetchJobTypeById(req.user.id, jobTypeId);
+    if (!jobType) {
+      return res.status(404).json({ error: "Job type not found" });
+    }
+
+    const [[usage]] = await db.promise().query(
+      `
+        SELECT COUNT(*) AS count
+        FROM Jobs
+        WHERE user_id = ? AND job_type_id = ?
+      `,
+      [req.user.id, jobTypeId]
+    );
+
+    if ((usage?.count || 0) > 0) {
+      return res.status(409).json({ error: "This job type is in use and cannot be deleted yet" });
+    }
+
+    await db.promise().query("DELETE FROM job_types WHERE id = ? AND user_id = ?", [jobTypeId, req.user.id]);
+    return res.json({ message: "Job type deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting job type:", error);
+    return res.status(500).json({ error: "Database error" });
+  }
+});
+
 app.put(
   "/jobs/:id",
   requireAuth,
@@ -501,11 +820,8 @@ app.put(
         return true;
       }),
     body("address").optional().trim().isLength({ min: 5 }).withMessage("Address must be at least 5 characters"),
-    body("jobType")
-      .optional()
-      .trim()
-      .isIn(JOB_TYPE_OPTIONS)
-      .withMessage(`Job type must be one of: ${JOB_TYPE_OPTIONS.join(", ")}`),
+    body("jobTypeId").optional({ values: "falsy" }).isInt({ min: 1 }).withMessage("Invalid job type"),
+    body("jobType").optional().trim().isLength({ min: 2 }).withMessage("Job type is required"),
     body("jobDate")
       .optional()
       .isISO8601()
@@ -538,11 +854,12 @@ app.put(
       return res.status(400).json({ error: "Invalid job ID" });
     }
 
-    const { name, phone, address, jobType, jobDate, startTime, comments, status, payment } = req.body;
+    const { name, phone, address, jobDate, startTime, comments, status, payment } = req.body;
     const jobUpdates = [];
     const jobValues = [];
     const clientUpdates = [];
     const clientValues = [];
+    let jobType;
 
     if (name !== undefined) {
       clientUpdates.push("name = ?");
@@ -587,6 +904,18 @@ app.put(
     if (payment !== undefined) {
       jobUpdates.push("payment = ?");
       jobValues.push(Number.parseFloat(payment));
+    }
+
+    try {
+      if (req.body.jobTypeId !== undefined || req.body.jobType !== undefined) {
+        jobType = await ensureJobTypeForJob(req.user.id, req.body);
+        jobUpdates.push("job_type_id = ?");
+        jobValues.push(jobType.id);
+        jobUpdates.push("job_type = ?");
+        jobValues.push(jobType.name);
+      }
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({ error: error.message || "Invalid job type" });
     }
 
     if (jobUpdates.length === 0 && clientUpdates.length === 0) {

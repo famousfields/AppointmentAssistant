@@ -1,11 +1,13 @@
 import { useApi } from './apiContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { JOB_TYPE_OPTIONS } from './jobTypes'
+import useJobTypes from './useJobTypes'
+import { buildJobTypeSuggestionSet } from './jobTypes'
 import ClientSuggestions from './ClientSuggestions'
 import { applyClientSuggestion, buildClients, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
 import { parseDateValue } from './dateUtils'
 import GoogleMapsLink from './GoogleMapsLink'
+import JobTypeManager from './JobTypeManager'
 
 const EMPTY_FORM_DATA = {
   name: '',
@@ -34,6 +36,16 @@ export default function JobForm({ currentUser }) {
   const isInitialMount = useRef(true)
   const { fetchWithAuth } = useApi()
   const clients = useMemo(() => buildClients(clientJobs), [clientJobs])
+  const {
+    jobTypes,
+    loading: jobTypesLoading,
+    error: jobTypesError,
+    refreshJobTypes,
+    createJobType,
+    updateJobType,
+    deleteJobType
+  } = useJobTypes(currentUser)
+  const jobTypeSuggestions = useMemo(() => buildJobTypeSuggestionSet(jobTypes), [jobTypes])
 
   const validateField = (name, value) => {
     switch (name) {
@@ -118,6 +130,7 @@ export default function JobForm({ currentUser }) {
         setSuccessMessage('Job created! Redirecting to Jobs...')
         setFormData(EMPTY_FORM_DATA)
         setSuggestionField(null)
+        await refreshJobTypes()
         redirectTimer.current = setTimeout(() => {
           navigate('/jobs')
         }, 1000)
@@ -222,56 +235,67 @@ export default function JobForm({ currentUser }) {
   }, [])
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="job-form">
-      <div>
-        <h3>Appointment details</h3>
-        <p className="login-subtitle">
-          Capture the client info, scheduled date, and any notes your team should see before the visit.
-        </p>
-      </div>
-
-      {!currentUser && (
-        <div className="form-error-message">
-          Please log in before creating a job.
-        </div>
-      )}
-
-      <div className="form-group">
-        <label htmlFor="name">Client name</label>
-        <input
-          id="name"
-          name="name"
-          type="text"
-          autoComplete="name"
-          required
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField('name')
-          }}
-          value={formData.name}
-          placeholder="Jane Smith"
-        />
-        {errors.name && <div className="form-error">{errors.name}</div>}
-      </div>
-      <ClientSuggestions
-        clients={clients}
-        query={formData.name}
-        field="name"
-        visible={suggestionField === 'name'}
-        onSelect={(client) => {
-          setFormData((prev) => ({
-            ...prev,
-            ...applyClientSuggestion(client)
-          }))
-          setErrors((prev) => ({
-            ...prev,
-            name: '',
-            phone: '',
-            address: ''
-          }))
-          setSuggestionField(null)
-        }}
+    <div className="job-form-layout">
+      <JobTypeManager
+        jobTypes={jobTypes}
+        loading={jobTypesLoading}
+        error={jobTypesError}
+        disabled={!currentUser}
+        onCreate={createJobType}
+        onUpdate={updateJobType}
+        onDelete={deleteJobType}
       />
+
+      <form onSubmit={handleSubmit} noValidate className="job-form">
+        <div>
+          <h3>Appointment details</h3>
+          <p className="login-subtitle">
+            Capture the client info, scheduled date, and any notes your team should see before the visit.
+          </p>
+        </div>
+
+        {!currentUser && (
+          <div className="form-error-message">
+            Please log in before creating a job.
+          </div>
+        )}
+
+        <div className="form-group">
+          <label htmlFor="name">Client name</label>
+          <input
+            id="name"
+            name="name"
+            type="text"
+            autoComplete="name"
+            required
+            onChange={(e) => {
+              handleChange(e)
+              setSuggestionField('name')
+            }}
+            value={formData.name}
+            placeholder="Jane Smith"
+          />
+          {errors.name && <div className="form-error">{errors.name}</div>}
+        </div>
+        <ClientSuggestions
+          clients={clients}
+          query={formData.name}
+          field="name"
+          visible={suggestionField === 'name'}
+          onSelect={(client) => {
+            setFormData((prev) => ({
+              ...prev,
+              ...applyClientSuggestion(client)
+            }))
+            setErrors((prev) => ({
+              ...prev,
+              name: '',
+              phone: '',
+              address: ''
+            }))
+            setSuggestionField(null)
+          }}
+        />
 
       <div className="form-group">
         <label htmlFor="phone">Phone</label>
@@ -353,109 +377,110 @@ export default function JobForm({ currentUser }) {
         }}
       />
 
-      <div className="form-group">
-        <label htmlFor="jobType">Job type</label>
-        <select
-          id="jobType"
-          name="jobType"
-          required
-          className="jobs-status-select"
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField(null)
-          }}
-          value={formData.jobType}
+        <div className="form-group">
+          <label htmlFor="jobType">Job type</label>
+          <input
+            id="jobType"
+            name="jobType"
+            type="text"
+            list="job-type-options"
+            required
+            onChange={(e) => {
+              handleChange(e)
+              setSuggestionField(null)
+            }}
+            value={formData.jobType}
+            placeholder="Mulch installation"
+          />
+          <datalist id="job-type-options">
+            {jobTypeSuggestions.map((jobType) => (
+              <option key={jobType} value={jobType} />
+            ))}
+          </datalist>
+          <div className="form-hint">Type a business-specific job label. Save the color in the Job Types panel so the calendar stays easy to scan.</div>
+          {errors.jobType && <div className="form-error">{errors.jobType}</div>}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="jobDate">Date</label>
+          <input
+            id="jobDate"
+            name="jobDate"
+            type="date"
+            required
+            onChange={(e) => {
+              handleChange(e)
+              setSuggestionField(null)
+            }}
+            value={formData.jobDate}
+            placeholder="YYYY-MM-DD"
+          />
+          {errors.jobDate && <div className="form-error">{errors.jobDate}</div>}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="startTime">Start time</label>
+          <input
+            id="startTime"
+            name="startTime"
+            type="time"
+            required
+            onChange={(e) => {
+              handleChange(e)
+              setSuggestionField(null)
+            }}
+            value={formData.startTime}
+          />
+          <div className="form-hint">Each job reserves a one-hour timeslot starting at this time.</div>
+          {errors.startTime && <div className="form-error">{errors.startTime}</div>}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="payment">Payment</label>
+          <input
+            id="payment"
+            name="payment"
+            type="number"
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            onChange={(e) => {
+              handleChange(e)
+              setSuggestionField(null)
+            }}
+            value={formData.payment}
+            placeholder="0.00"
+          />
+          {errors.payment && <div className="form-error">{errors.payment}</div>}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="comments">Comments</label>
+          <textarea
+            id="comments"
+            name="comments"
+            onChange={(e) => {
+              handleChange(e)
+              setSuggestionField(null)
+            }}
+            value={formData.comments}
+            placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
+          ></textarea>
+          <div className="form-hint">Add gate codes, parking notes, scope details, or anything the team should know before arrival.</div>
+          {errors.comments && <div className="form-error">{errors.comments}</div>}
+        </div>
+
+        {errors.submit && <div className="form-error-message">{errors.submit}</div>}
+        {successMessage && <div className="form-success-message">{successMessage}</div>}
+
+        <button
+          type="submit"
+          disabled={hasErrors || !currentUser}
+          className="form-submit-button"
         >
-          <option value="">Select a job type</option>
-          {JOB_TYPE_OPTIONS.map((jobType) => (
-            <option key={jobType} value={jobType}>
-              {jobType}
-            </option>
-          ))}
-        </select>
-        <div className="form-hint">Each job type has its own calendar color so appointments are easy to scan.</div>
-        {errors.jobType && <div className="form-error">{errors.jobType}</div>}
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="jobDate">Date</label>
-        <input
-          id="jobDate"
-          name="jobDate"
-          type="date"
-          required
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField(null)
-          }}
-          value={formData.jobDate}
-          placeholder="YYYY-MM-DD"
-        />
-        {errors.jobDate && <div className="form-error">{errors.jobDate}</div>}
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="startTime">Start time</label>
-        <input
-          id="startTime"
-          name="startTime"
-          type="time"
-          required
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField(null)
-          }}
-          value={formData.startTime}
-        />
-        <div className="form-hint">Each job reserves a one-hour timeslot starting at this time.</div>
-        {errors.startTime && <div className="form-error">{errors.startTime}</div>}
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="payment">Payment</label>
-        <input
-          id="payment"
-          name="payment"
-          type="number"
-          min="0"
-          step="0.01"
-          inputMode="decimal"
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField(null)
-          }}
-          value={formData.payment}
-          placeholder="0.00"
-        />
-        {errors.payment && <div className="form-error">{errors.payment}</div>}
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="comments">Comments</label>
-        <textarea
-          id="comments"
-          name="comments"
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField(null)
-          }}
-          value={formData.comments}
-          placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
-        ></textarea>
-        <div className="form-hint">Add gate codes, parking notes, scope details, or anything the team should know before arrival.</div>
-        {errors.comments && <div className="form-error">{errors.comments}</div>}
-      </div>
-
-      {errors.submit && <div className="form-error-message">{errors.submit}</div>}
-      {successMessage && <div className="form-success-message">{successMessage}</div>}
-
-      <button
-        type="submit"
-        disabled={hasErrors || !currentUser}
-        className="form-submit-button"
-      >
-        Save appointment
-      </button>
-    </form>
+          Save appointment
+        </button>
+      </form>
+    </div>
   )
 }

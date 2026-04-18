@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
 import { buildClients } from './clientUtils'
 import { formatDisplayDate } from './dateUtils'
+import useJobTypes from './useJobTypes'
 
 export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
@@ -19,6 +20,7 @@ export default function JobsList({ currentUser }) {
   const [isDeletingJob, setIsDeletingJob] = useState(false)
   const [editError, setEditError] = useState('')
   const { fetchWithAuth } = useApi()
+  const { jobTypes, refreshJobTypes } = useJobTypes(currentUser)
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -277,6 +279,7 @@ export default function JobsList({ currentUser }) {
         payment: updates.payment,
         comments: updates.comments
       })
+      await refreshJobTypes()
       closeEditModal()
     } catch (err) {
       console.error('Error updating job:', err)
@@ -506,6 +509,7 @@ export default function JobsList({ currentUser }) {
         key={editingJob?.id || 'jobs-editor'}
         job={editingJob}
         clients={clients}
+        jobTypes={jobTypes}
         saving={isSavingJob}
         deleting={isDeletingJob}
         error={editError}

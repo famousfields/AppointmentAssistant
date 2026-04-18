@@ -2,7 +2,8 @@ import { useApi } from './apiContext'
 import { useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
 import { buildClients } from './clientUtils'
-import { getJobTypePalette, JOB_TYPE_OPTIONS } from './jobTypes'
+import { DEFAULT_JOB_TYPES, getJobTypeOptions, getJobTypePalette } from './jobTypes'
+import useJobTypes from './useJobTypes'
 import { parseDateValue } from './dateUtils'
 
 const CALENDAR_VIEWS = [
@@ -204,8 +205,8 @@ const getCalendarRangeLabel = (view, anchorDate) => {
   return String(anchorDate.getFullYear())
 }
 
-const getCalendarJobStyle = (jobType) => {
-  const palette = getJobTypePalette(jobType)
+const getCalendarJobStyle = (jobType, jobTypes) => {
+  const palette = getJobTypePalette(jobType, jobTypes)
 
   return {
     '--job-bg': palette.background,
@@ -335,11 +336,11 @@ const buildDayTimeline = (dayJobs) => {
   }
 }
 
-function CalendarJobCard({ job, onClick, onEdit, compact = false, className = '', style, showMeta = !compact }) {
+function CalendarJobCard({ job, jobTypes, onClick, onEdit, compact = false, className = '', style, showMeta = !compact }) {
   return (
     <div
       className={`calendar-job-pill${compact ? ' calendar-job-pill--compact' : ''}${onEdit ? ' calendar-job-pill--editable' : ''}${className ? ` ${className}` : ''}`}
-      style={{ ...getCalendarJobStyle(job.job_type), ...style }}
+      style={{ ...getCalendarJobStyle(job.job_type_color || job.job_type, jobTypes), ...style }}
     >
       <button
         type="button"
@@ -383,6 +384,7 @@ export default function CalendarPage({ currentUser }) {
   const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()))
 
   const { fetchWithAuth } = useApi()
+  const { jobTypes, refreshJobTypes } = useJobTypes(currentUser)
 
   useEffect(() => {
     if (!currentUser) {
@@ -561,6 +563,7 @@ export default function CalendarPage({ currentUser }) {
         payment: updates.payment,
         comments: updates.comments
       })
+      await refreshJobTypes()
       closeEditJob()
     } catch (err) {
       console.error('Error updating calendar job:', err)
@@ -668,6 +671,7 @@ export default function CalendarPage({ currentUser }) {
                           <CalendarJobCard
                               key={job.id}
                               job={job}
+                              jobTypes={jobTypes}
                               onClick={openJobDetails}
                               onEdit={openEditJob}
                               className="calendar-job-pill--timeline"
@@ -699,7 +703,7 @@ export default function CalendarPage({ currentUser }) {
                   </div>
                   <div className="calendar-agenda-list calendar-agenda-list--secondary">
                     {unscheduledJobs.map((job) => (
-                      <CalendarJobCard key={job.id} job={job} onClick={openJobDetails} onEdit={openEditJob} compact />
+                      <CalendarJobCard key={job.id} job={job} jobTypes={jobTypes} onClick={openJobDetails} onEdit={openEditJob} compact />
                     ))}
                   </div>
                 </div>
@@ -736,7 +740,7 @@ export default function CalendarPage({ currentUser }) {
                   <p className="calendar-week-empty">No jobs</p>
                 ) : (
                   dayJobs.map((job) => (
-                    <CalendarJobCard key={job.id} job={job} onClick={openJobDetails} compact />
+                    <CalendarJobCard key={job.id} job={job} jobTypes={jobTypes} onClick={openJobDetails} compact />
                   ))
                 )}
               </div>
@@ -838,7 +842,7 @@ export default function CalendarPage({ currentUser }) {
                       {firstJob && (
                         <span
                           className="calendar-mini-dot"
-                          style={{ background: getJobTypePalette(firstJob.job_type).background }}
+                          style={{ background: getJobTypePalette(firstJob.job_type_color || firstJob.job_type, jobTypes).background }}
                         />
                       )}
                       {dayJobs.length > 1 && (
@@ -938,13 +942,13 @@ export default function CalendarPage({ currentUser }) {
       </div>
 
       <div className="calendar-legend">
-        {JOB_TYPE_OPTIONS.map((jobType) => (
-          <div key={jobType} className="calendar-legend-item">
+        {getJobTypeOptions(jobTypes.length > 0 ? jobTypes : DEFAULT_JOB_TYPES).map((jobType) => (
+          <div key={jobType.id || jobType.name} className="calendar-legend-item">
             <span
               className="calendar-legend-swatch"
-              style={{ background: getJobTypePalette(jobType).background }}
+              style={{ background: getJobTypePalette(jobType.color || jobType.name, jobTypes).background }}
             />
-            <span>{jobType}</span>
+            <span>{jobType.name || jobType}</span>
           </div>
         ))}
       </div>
@@ -1027,6 +1031,7 @@ export default function CalendarPage({ currentUser }) {
           key={editingJob.id}
           job={editingJob}
           clients={clients}
+          jobTypes={jobTypes}
           saving={isSavingJob}
           deleting={isDeletingJob}
           error={editError}

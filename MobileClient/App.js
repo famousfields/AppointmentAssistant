@@ -37,6 +37,7 @@ const NAV_ITEMS = [
 
 const JOB_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
 const JOB_TYPE_OPTIONS = ['0 Turn Mower', 'Push Mower', 'Riding Mower', 'Pressure Washer']
+const JOB_TYPE_COLOR_PRESETS = ['#22c55e', '#f97316', '#3b82f6', '#06b6d4', '#8b5cf6', '#f43f5e', '#eab308', '#14b8a6']
 const CALENDAR_VIEWS = [
   { key: 'day', label: 'Daily' },
   { key: 'week', label: 'Weekly' },
@@ -50,12 +51,11 @@ const DAY_TIMELINE_DEFAULT_END_HOUR = 18
 const DAY_TIMELINE_MIN_VISIBLE_HOURS = 8
 const DAY_TIMELINE_ROW_HEIGHT = 76
 const DAY_TIMELINE_MIN_CARD_HEIGHT = 56
-const JOB_TYPE_COLORS = {
-  '0 Turn Mower': { background: '#22c55e', border: '#16a34a', text: '#f0fdf4' },
-  'Push Mower': { background: '#f97316', border: '#ea580c', text: '#fff7ed' },
-  'Riding Mower': { background: '#3b82f6', border: '#2563eb', text: '#eff6ff' },
-  'Pressure Washer': { background: '#06b6d4', border: '#0891b2', text: '#ecfeff' }
-}
+const JOB_TYPE_DEFAULTS = JOB_TYPE_OPTIONS.map((name, index) => ({
+  name,
+  color: JOB_TYPE_COLOR_PRESETS[index],
+  sort_order: index
+}))
 
 const EMPTY_JOB_FORM = {
   name: '',
@@ -249,8 +249,105 @@ const buildMonthGrid = (value) => {
   return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index))
 }
 
-const getJobTypeColors = (jobType) =>
-  JOB_TYPE_COLORS[jobType] || JOB_TYPE_COLORS[JOB_TYPE_OPTIONS[0]]
+const JOB_TYPE_COLOR_PATTERN = /^#([0-9a-fA-F]{6})$/
+
+const normalizeJobTypeName = (value) => String(value || '').trim()
+
+const normalizeJobTypeKey = (value) => normalizeJobTypeName(value).toLowerCase()
+
+const normalizeJobTypeColor = (value) => {
+  const trimmed = String(value || '').trim()
+  return JOB_TYPE_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : ''
+}
+
+const hexToRgb = (value) => {
+  const hex = normalizeJobTypeColor(value)
+  if (!hex) return null
+
+  return {
+    r: Number.parseInt(hex.slice(1, 3), 16),
+    g: Number.parseInt(hex.slice(3, 5), 16),
+    b: Number.parseInt(hex.slice(5, 7), 16)
+  }
+}
+
+const rgbToHex = ({ r, g, b }) =>
+  `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`
+
+const clampColor = (value, min, max) => Math.min(Math.max(value, min), max)
+
+const mixColor = (first, second, ratio) => {
+  const source = hexToRgb(first)
+  const target = hexToRgb(second)
+  if (!source || !target) return first
+
+  return rgbToHex({
+    r: Math.round(source.r + ((target.r - source.r) * ratio)),
+    g: Math.round(source.g + ((target.g - source.g) * ratio)),
+    b: Math.round(source.b + ((target.b - source.b) * ratio))
+  })
+}
+
+const getContrastTextColor = (backgroundColor) => {
+  const rgb = hexToRgb(backgroundColor)
+  if (!rgb) return '#f8fafc'
+
+  const luminance = (0.2126 * rgb.r) + (0.7152 * rgb.g) + (0.0722 * rgb.b)
+  return luminance > 150 ? '#0f172a' : '#f8fafc'
+}
+
+const buildFallbackJobTypeColor = (value) => {
+  const normalized = normalizeJobTypeKey(value)
+  let hash = 0
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0
+  }
+
+  const red = 96 + (hash & 0x3f)
+  const green = 96 + ((hash >> 6) & 0x3f)
+  const blue = 96 + ((hash >> 12) & 0x3f)
+
+  return rgbToHex({
+    r: clampColor(red, 0, 255),
+    g: clampColor(green, 0, 255),
+    b: clampColor(blue, 0, 255)
+  })
+}
+
+const buildJobTypePalette = (color, fallbackSeed) => {
+  const background = normalizeJobTypeColor(color) || buildFallbackJobTypeColor(fallbackSeed)
+  return {
+    background,
+    border: mixColor(background, '#000000', 0.18),
+    text: getContrastTextColor(background)
+  }
+}
+
+const getJobTypeRecord = (value, jobTypes = []) => {
+  const normalizedValue = normalizeJobTypeName(value)
+  const normalizedKey = normalizeJobTypeKey(value)
+
+  return jobTypes.find((jobType) => {
+    if (jobType.id !== undefined && String(jobType.id) === normalizedValue) {
+      return true
+    }
+
+    return (
+      normalizeJobTypeKey(jobType.name) === normalizedKey ||
+      normalizeJobTypeKey(jobType.normalized_name) === normalizedKey
+    )
+  }) || null
+}
+
+const getJobTypeColors = (jobType, jobTypes = []) => {
+  const record = getJobTypeRecord(jobType, jobTypes)
+  if (normalizeJobTypeColor(jobType) && !record) {
+    return buildJobTypePalette(jobType, jobType)
+  }
+
+  return buildJobTypePalette(record?.color, record?.name || jobType)
+}
 
 const assignTimelineColumns = (scheduledJobs) => {
   const sortedJobs = [...scheduledJobs].sort(
@@ -465,6 +562,13 @@ export default function App() {
   const [jobErrors, setJobErrors] = useState({})
   const [jobStatus, setJobStatus] = useState(null)
   const [jobSuggestionField, setJobSuggestionField] = useState(null)
+  const [jobTypes, setJobTypes] = useState([])
+  const [jobTypesLoading, setJobTypesLoading] = useState(false)
+  const [jobTypesError, setJobTypesError] = useState('')
+  const [jobTypeDraft, setJobTypeDraft] = useState({ name: '', color: JOB_TYPE_COLOR_PRESETS[0] })
+  const [jobTypeEditingId, setJobTypeEditingId] = useState(null)
+  const [jobTypeFormError, setJobTypeFormError] = useState('')
+  const [jobTypeSaving, setJobTypeSaving] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
   const [calendarView, setCalendarView] = useState('day')
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => startOfDay(new Date()))
@@ -550,7 +654,54 @@ export default function App() {
     }
   }, [session])
 
+  useEffect(() => {
+    if (!session) {
+      setJobTypes([])
+      setJobTypesError('')
+      setJobTypesLoading(false)
+      return
+    }
+
+    let active = true
+    const loadJobTypes = async () => {
+      setJobTypesLoading(true)
+      setJobTypesError('')
+
+      try {
+        const response = await apiFetch('/job-types', {
+          accessToken: session.accessToken,
+          refreshToken: session.refreshToken,
+          onSessionChange: setSession
+        })
+        if (!response.ok) throw new Error('Unable to load job types')
+        const payload = await response.json()
+        if (active) setJobTypes(Array.isArray(payload) ? payload : [])
+      } catch (error) {
+        if (active) {
+          setJobTypes([])
+          setJobTypesError(error.message || 'Unable to load job types')
+        }
+      } finally {
+        if (active) setJobTypesLoading(false)
+      }
+    }
+
+    loadJobTypes()
+    return () => {
+      active = false
+    }
+  }, [session])
+
   const clients = useMemo(() => buildClients(jobs), [jobs])
+  const jobTypeOptions = useMemo(() => {
+    const source = jobTypes.length > 0 ? jobTypes : JOB_TYPE_DEFAULTS
+    return [...source].sort((first, second) => {
+      const firstOrder = Number(first.sort_order ?? 0)
+      const secondOrder = Number(second.sort_order ?? 0)
+      if (firstOrder !== secondOrder) return firstOrder - secondOrder
+      return normalizeJobTypeName(first.name).localeCompare(normalizeJobTypeName(second.name))
+    })
+  }, [jobTypes])
 
   const filteredClients = useMemo(() => {
     const query = clientSearch.trim().toLowerCase()
@@ -607,6 +758,149 @@ export default function App() {
     }
   }
 
+  const refreshJobTypes = async () => {
+    if (!session) return
+    const response = await apiFetch('/job-types', {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+    if (response.ok) {
+      setJobTypes(await response.json())
+    }
+  }
+
+  const createJobType = async ({ name, color }) => {
+    if (!session) throw new Error('Please sign in to manage job types')
+
+    const response = await apiFetch('/job-types', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        color
+      }),
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create job type')
+    }
+
+    await refreshJobTypes()
+    return payload
+  }
+
+  const updateJobType = async (jobTypeId, { name, color }) => {
+    if (!session) throw new Error('Please sign in to manage job types')
+
+    const response = await apiFetch(`/job-types/${jobTypeId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name,
+        color
+      }),
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to update job type')
+    }
+
+    await refreshJobTypes()
+    return payload
+  }
+
+  const deleteJobType = async (jobTypeId) => {
+    if (!session) throw new Error('Please sign in to manage job types')
+
+    const response = await apiFetch(`/job-types/${jobTypeId}`, {
+      method: 'DELETE',
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to delete job type')
+    }
+
+    await refreshJobTypes()
+    return payload
+  }
+
+  const startEditingJobType = (jobType) => {
+    setJobTypeEditingId(jobType.id)
+    setJobTypeDraft({
+      name: jobType.name || '',
+      color: normalizeJobTypeColor(jobType.color) || JOB_TYPE_COLOR_PRESETS[0]
+    })
+    setJobTypeFormError('')
+  }
+
+  const resetJobTypeDraft = () => {
+    setJobTypeEditingId(null)
+    setJobTypeDraft({ name: '', color: JOB_TYPE_COLOR_PRESETS[0] })
+    setJobTypeFormError('')
+  }
+
+  const submitJobTypeDraft = async () => {
+    const name = normalizeJobTypeName(jobTypeDraft.name)
+    if (!name) {
+      setJobTypeFormError('Enter a job type name')
+      return
+    }
+
+    setJobTypeSaving(true)
+    setJobTypeFormError('')
+
+    try {
+      if (jobTypeEditingId) {
+        await updateJobType(jobTypeEditingId, { name, color: jobTypeDraft.color })
+      } else {
+        await createJobType({ name, color: jobTypeDraft.color })
+      }
+      resetJobTypeDraft()
+    } catch (error) {
+      setJobTypeFormError(error.message || 'Unable to save job type')
+    } finally {
+      setJobTypeSaving(false)
+    }
+  }
+
+  const removeJobType = async (jobType) => {
+    Alert.alert(
+      'Delete job type?',
+      `Delete the ${jobType.name} job type?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setJobTypeSaving(true)
+              await deleteJobType(jobType.id)
+              if (jobTypeEditingId === jobType.id) {
+                resetJobTypeDraft()
+              }
+            } catch (error) {
+              setJobTypeFormError(error.message || 'Unable to delete job type')
+            } finally {
+              setJobTypeSaving(false)
+            }
+          }
+        }
+      ]
+    )
+  }
+
   const validateJobField = (name, value) => {
     switch (name) {
       case 'name':
@@ -618,7 +912,7 @@ export default function App() {
       case 'address':
         return value.trim().length >= 5 ? '' : 'Enter a fuller address so the job location is clear.'
       case 'jobType':
-        return JOB_TYPE_OPTIONS.includes(value) ? '' : 'Choose one of the four supported job types.'
+        return value.trim().length > 0 ? '' : 'Job type is required.'
       case 'jobDate':
         return parseDateValue(value) ? '' : 'Pick a valid date for this appointment.'
       case 'startTime':
@@ -798,6 +1092,7 @@ export default function App() {
       await clearJobDraft()
       setActiveTab('calendar')
       await refreshJobs()
+      await refreshJobTypes()
     } catch (error) {
       setJobStatus({ type: 'error', message: toFriendlyJobError(error.message) })
     }
@@ -833,6 +1128,7 @@ export default function App() {
       throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to update job')
     }
     await refreshJobs()
+    await refreshJobTypes()
   }
 
   const saveClientUpdates = async (client, updates) => {
@@ -898,7 +1194,7 @@ export default function App() {
   }
 
   const renderCalendarJobCard = (job, compact = false) => {
-    const palette = getJobTypeColors(job.job_type)
+    const palette = getJobTypeColors(job.job_type_color || job.job_type, jobTypes)
 
     return (
       <View
@@ -931,7 +1227,7 @@ export default function App() {
 
   const renderCalendarTimelineJobCard = (item, timelineStartMinutes) => {
     const { job, startMinutes, endMinutes, columnIndex, columnCount } = item
-    const palette = getJobTypeColors(job.job_type)
+    const palette = getJobTypeColors(job.job_type_color || job.job_type, jobTypes)
     const top = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT + 6
     const height = Math.max(((endMinutes - startMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT - 12, DAY_TIMELINE_MIN_CARD_HEIGHT)
     const width = `${100 / columnCount}%`
@@ -1063,7 +1359,7 @@ export default function App() {
           {monthDays.map((date) => {
             const dateKey = toDateKey(date)
             const dayJobs = jobsByDate.get(dateKey) || []
-            const palette = dayJobs[0] ? getJobTypeColors(dayJobs[0].job_type) : null
+            const palette = dayJobs[0] ? getJobTypeColors(dayJobs[0].job_type_color || dayJobs[0].job_type, jobTypes) : null
 
             return (
               <Pressable
@@ -1120,14 +1416,14 @@ export default function App() {
             </View>
           </View>
           <View style={styles.yearLegendRow}>
-            {JOB_TYPE_OPTIONS.map((jobType) => {
-              const count = monthJobs.filter((job) => job.job_type === jobType).length
+            {jobTypeOptions.map((jobType) => {
+              const count = monthJobs.filter((job) => normalizeJobTypeKey(job.job_type) === normalizeJobTypeKey(jobType.name)).length
               if (count === 0) return null
 
               return (
-                <View key={jobType} style={styles.yearLegendItem}>
-                  <View style={[styles.yearLegendDot, { backgroundColor: getJobTypeColors(jobType).background }]} />
-                  <Text style={commonStyles.text}>{jobType}: {count}</Text>
+                <View key={jobType.id || jobType.name} style={styles.yearLegendItem}>
+                  <View style={[styles.yearLegendDot, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
+                  <Text style={commonStyles.text}>{jobType.name}: {count}</Text>
                 </View>
               )
             })}
@@ -1295,90 +1591,183 @@ export default function App() {
           ) : null}
 
           {activeTab === 'jobs-new' ? (
-            <View style={commonStyles.panel}>
-              <Text style={commonStyles.sectionTitle}>Appointment details</Text>
-              <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
-                setJobForm((current) => ({ ...current, name: value }))
-                setJobErrors((current) => ({ ...current, name: '' }))
-                setJobStatus(null)
-                setJobSuggestionField('name')
-              }} error={jobErrors.name} placeholder="Jane Smith" />
-              <ClientSuggestions
-                clients={clients}
-                query={jobForm.name}
-                field="name"
-                visible={jobSuggestionField === 'name'}
-                onSelect={(client) => {
-                  setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
-                  setJobSuggestionField(null)
-                  setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+            <>
+              <Panel title="Job types" subtitle="Customize">
+                <Text style={commonStyles.text}>
+                  Define the labels your business uses and choose the color that appears in the calendar.
+                </Text>
+                <FormField
+                  label="Name"
+                  value={jobTypeDraft.name}
+                  onChangeText={(value) => {
+                    setJobTypeDraft((current) => ({ ...current, name: value }))
+                    setJobTypeFormError('')
+                  }}
+                  placeholder="Mulch installation"
+                />
+                <Text style={commonStyles.label}>Color</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  <View style={styles.colorPresetRow}>
+                    {JOB_TYPE_COLOR_PRESETS.map((color) => {
+                      const active = normalizeJobTypeColor(jobTypeDraft.color) === color
+                      return (
+                        <Pressable
+                          key={color}
+                          style={[styles.colorPreset, { backgroundColor: color }, active ? styles.colorPresetActive : null]}
+                          onPress={() => {
+                            setJobTypeDraft((current) => ({ ...current, color }))
+                            setJobTypeFormError('')
+                          }}
+                        />
+                      )
+                    })}
+                  </View>
+                </ScrollView>
+                <TextInput
+                  style={commonStyles.input}
+                  value={jobTypeDraft.color}
+                  onChangeText={(value) => {
+                    setJobTypeDraft((current) => ({ ...current, color: value }))
+                    setJobTypeFormError('')
+                  }}
+                  placeholder="#6d7cff"
+                  placeholderTextColor={colors.textMuted}
+                />
+                <View style={styles.jobTypeActionRow}>
+                  {jobTypeEditingId ? (
+                    <Pressable
+                      style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
+                      onPress={resetJobTypeDraft}
+                      disabled={jobTypeSaving}
+                    >
+                      <Text style={commonStyles.buttonText}>Cancel edit</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    style={[commonStyles.button, commonStyles.buttonPrimary, styles.jobTypeActionButton]}
+                    onPress={submitJobTypeDraft}
+                    disabled={jobTypeSaving}
+                  >
+                    <Text style={commonStyles.buttonText}>{jobTypeSaving ? 'Saving...' : jobTypeEditingId ? 'Save job type' : 'Add job type'}</Text>
+                  </Pressable>
+                </View>
+                {jobTypeFormError ? <Text style={commonStyles.errorText}>{jobTypeFormError}</Text> : null}
+                {jobTypesError ? <Text style={commonStyles.errorText}>{jobTypesError}</Text> : null}
+                {jobTypesLoading ? (
+                  <Text style={commonStyles.text}>Loading job types...</Text>
+                ) : jobTypes.length === 0 ? (
+                  <Text style={commonStyles.text}>No job types yet. Add your first one above.</Text>
+                ) : (
+                  <View style={styles.jobTypeList}>
+                    {jobTypes.map((jobType) => {
+                      const palette = getJobTypeColors(jobType.color || jobType.name, jobTypes)
+                      return (
+                        <View key={jobType.id || jobType.name} style={[styles.jobTypeListItem, { backgroundColor: palette.background, borderColor: palette.border }]}>
+                          <View style={[styles.jobTypeSwatch, { backgroundColor: palette.background }]} />
+                          <View style={styles.jobTypeListContent}>
+                            <Text style={[commonStyles.heading3, { color: palette.text }]}>{jobType.name}</Text>
+                            <Text style={[commonStyles.text, { color: palette.text }]}>{normalizeJobTypeColor(jobType.color) || palette.background}</Text>
+                          </View>
+                          <View style={styles.jobTypeListActions}>
+                            <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => startEditingJobType(jobType)}>
+                              <Text style={styles.inlineActionText}>Edit</Text>
+                            </Pressable>
+                            <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => removeJobType(jobType)}>
+                              <Text style={styles.inlineActionText}>Delete</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      )
+                    })}
+                  </View>
+                )}
+              </Panel>
+
+              <View style={commonStyles.panel}>
+                <Text style={commonStyles.sectionTitle}>Appointment details</Text>
+                <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, name: value }))
+                  setJobErrors((current) => ({ ...current, name: '' }))
                   setJobStatus(null)
-                }}
-              />
-              <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
-                setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
-                setJobErrors((current) => ({ ...current, phone: '' }))
-                setJobStatus(null)
-                setJobSuggestionField('phone')
-              }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
-              <ClientSuggestions
-                clients={clients}
-                query={jobForm.phone}
-                field="phone"
-                visible={jobSuggestionField === 'phone'}
-                onSelect={(client) => {
-                  setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
-                  setJobSuggestionField(null)
-                  setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                  setJobSuggestionField('name')
+                }} error={jobErrors.name} placeholder="Jane Smith" />
+                <ClientSuggestions
+                  clients={clients}
+                  query={jobForm.name}
+                  field="name"
+                  visible={jobSuggestionField === 'name'}
+                  onSelect={(client) => {
+                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                    setJobSuggestionField(null)
+                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                    setJobStatus(null)
+                  }}
+                />
+                <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
+                  setJobErrors((current) => ({ ...current, phone: '' }))
                   setJobStatus(null)
-                }}
-              />
-              <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
-                setJobForm((current) => ({ ...current, address: value }))
-                setJobErrors((current) => ({ ...current, address: '' }))
-                setJobStatus(null)
-                setJobSuggestionField('address')
-              }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={jobForm.address} />} helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
-              <ClientSuggestions
-                clients={clients}
-                query={jobForm.address}
-                field="address"
-                visible={jobSuggestionField === 'address'}
-                onSelect={(client) => {
-                  setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
-                  setJobSuggestionField(null)
-                  setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                  setJobSuggestionField('phone')
+                }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
+                <ClientSuggestions
+                  clients={clients}
+                  query={jobForm.phone}
+                  field="phone"
+                  visible={jobSuggestionField === 'phone'}
+                  onSelect={(client) => {
+                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                    setJobSuggestionField(null)
+                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                    setJobStatus(null)
+                  }}
+                />
+                <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, address: value }))
+                  setJobErrors((current) => ({ ...current, address: '' }))
                   setJobStatus(null)
-                }}
-              />
-              <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
-                setJobForm((current) => ({ ...current, jobType: value }))
-                setJobErrors((current) => ({ ...current, jobType: '' }))
-                setJobStatus(null)
-              }} error={jobErrors.jobType} options={JOB_TYPE_OPTIONS} />
-              <DateField label="Date" value={jobForm.jobDate} onChange={(value) => {
-                setJobForm((current) => ({ ...current, jobDate: value }))
-                setJobErrors((current) => ({ ...current, jobDate: '' }))
-                setJobStatus(null)
-              }} error={jobErrors.jobDate} />
-              <TimeField label="Start time" value={jobForm.startTime} onChange={(value) => {
-                setJobForm((current) => ({ ...current, startTime: value }))
-                setJobErrors((current) => ({ ...current, startTime: '' }))
-                setJobStatus(null)
-              }} error={jobErrors.startTime} />
-              <CurrencyField label="Payment" value={jobForm.payment} onChangeText={(value) => {
-                setJobForm((current) => ({ ...current, payment: value }))
-                setJobErrors((current) => ({ ...current, payment: '' }))
-                setJobStatus(null)
-              }} error={jobErrors.payment} placeholder="0.00" />
-              <FormField label="Comments" value={jobForm.comments} onChangeText={(value) => {
-                setJobForm((current) => ({ ...current, comments: value }))
-                setJobErrors((current) => ({ ...current, comments: '' }))
-                setJobStatus(null)
-              }} error={jobErrors.comments} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
-              {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
-              <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob}><Text style={commonStyles.buttonText}>Save appointment</Text></Pressable>
-            </View>
+                  setJobSuggestionField('address')
+                }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={jobForm.address} />} helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
+                <ClientSuggestions
+                  clients={clients}
+                  query={jobForm.address}
+                  field="address"
+                  visible={jobSuggestionField === 'address'}
+                  onSelect={(client) => {
+                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                    setJobSuggestionField(null)
+                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                    setJobStatus(null)
+                  }}
+                />
+                <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
+                  setJobForm((current) => ({ ...current, jobType: value }))
+                  setJobErrors((current) => ({ ...current, jobType: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.jobType} options={jobTypeOptions.map((jobType) => jobType.name)} />
+                <DateField label="Date" value={jobForm.jobDate} onChange={(value) => {
+                  setJobForm((current) => ({ ...current, jobDate: value }))
+                  setJobErrors((current) => ({ ...current, jobDate: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.jobDate} />
+                <TimeField label="Start time" value={jobForm.startTime} onChange={(value) => {
+                  setJobForm((current) => ({ ...current, startTime: value }))
+                  setJobErrors((current) => ({ ...current, startTime: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.startTime} />
+                <CurrencyField label="Payment" value={jobForm.payment} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, payment: value }))
+                  setJobErrors((current) => ({ ...current, payment: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.payment} placeholder="0.00" />
+                <FormField label="Comments" value={jobForm.comments} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, comments: value }))
+                  setJobErrors((current) => ({ ...current, comments: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.comments} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
+                {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
+                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob}><Text style={commonStyles.buttonText}>Save appointment</Text></Pressable>
+              </View>
+            </>
           ) : null}
 
           {activeTab === 'clients' ? (
@@ -1452,10 +1841,10 @@ export default function App() {
                 </ScrollView>
                 <Text style={commonStyles.heading3}>{getCalendarRangeLabel(calendarView, calendarAnchorDate)}</Text>
                 <View style={styles.calendarLegend}>
-                  {JOB_TYPE_OPTIONS.map((jobType) => (
-                    <View key={jobType} style={styles.calendarLegendItem}>
-                      <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType).background }]} />
-                      <Text style={styles.calendarLegendText}>{jobType}</Text>
+                  {jobTypeOptions.map((jobType) => (
+                    <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
+                      <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
+                      <Text style={styles.calendarLegendText}>{jobType.name}</Text>
                     </View>
                   ))}
                 </View>
@@ -1465,7 +1854,7 @@ export default function App() {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
-      <JobModal job={selectedJob} clients={clients} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
+      <JobModal job={selectedJob} clients={clients} jobTypes={jobTypes} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
       <ClientModal client={selectedClient} clients={clients} onClose={() => setSelectedClient(null)} onSave={saveClientUpdates} />
     </SafeAreaView>
   )
@@ -1897,11 +2286,12 @@ function ClientModal({ client, clients, onClose, onSave }) {
   )
 }
 
-function JobModal({ job, clients, onClose, onSave, onDelete }) {
+function JobModal({ job, clients, jobTypes = [], onClose, onSave, onDelete }) {
   const [formState, setFormState] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [suggestionField, setSuggestionField] = useState(null)
+  const jobTypeOptions = jobTypes.length > 0 ? jobTypes : JOB_TYPE_DEFAULTS
 
   useEffect(() => {
     if (!job) {
@@ -1997,7 +2387,7 @@ function JobModal({ job, clients, onClose, onSave, onDelete }) {
                   setSuggestionField(null)
                 }}
               />
-              <SelectField label="Job type" value={formState?.jobType || ''} onChange={(value) => setFormState((current) => ({ ...current, jobType: value }))} options={JOB_TYPE_OPTIONS} />
+              <SelectField label="Job type" value={formState?.jobType || ''} onChange={(value) => setFormState((current) => ({ ...current, jobType: value }))} options={jobTypeOptions.map((jobType) => jobType.name)} />
               <DateField label="Date" value={formState?.jobDate || ''} onChange={(value) => setFormState((current) => ({ ...current, jobDate: value }))} />
               <TimeField label="Start time" value={formState?.startTime || ''} onChange={(value) => setFormState((current) => ({ ...current, startTime: value }))} />
               <SelectField label="Status" value={formState?.status || ''} onChange={(value) => setFormState((current) => ({ ...current, status: value }))} options={JOB_STATUS_OPTIONS} />
@@ -2220,6 +2610,56 @@ const styles = StyleSheet.create({
   },
   calendarLegendSwatch: { width: 10, height: 10, borderRadius: 999 },
   calendarLegendText: { color: colors.heading, fontSize: 11, fontWeight: '700', flexShrink: 1 },
+  colorPresetRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingVertical: 4,
+    paddingRight: 6
+  },
+  colorPreset: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: 'transparent'
+  },
+  colorPresetActive: {
+    borderColor: colors.heading,
+    transform: [{ scale: 1.08 }]
+  },
+  jobTypeActionRow: {
+    flexDirection: 'row',
+    gap: 12
+  },
+  jobTypeActionButton: {
+    flex: 1
+  },
+  jobTypeList: {
+    gap: 10,
+    marginTop: 4
+  },
+  jobTypeListItem: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    gap: 12,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  jobTypeSwatch: {
+    width: 14,
+    height: 14,
+    borderRadius: 999
+  },
+  jobTypeListContent: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2
+  },
+  jobTypeListActions: {
+    flexDirection: 'row',
+    gap: 8
+  },
   calendarHero: {
     borderWidth: 1,
     borderColor: colors.border,
