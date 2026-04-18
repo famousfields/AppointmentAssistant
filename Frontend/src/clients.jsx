@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
 import { buildClients } from './clientUtils'
 import { formatDisplayDate } from './dateUtils'
+import useJobTypes from './useJobTypes'
 
 const formatDate = (dateString) =>
   formatDisplayDate(dateString, {
@@ -48,6 +49,7 @@ export default function ClientsList({ currentUser }) {
   const [isDeletingJob, setIsDeletingJob] = useState(false)
   const [editError, setEditError] = useState('')
   const { fetchWithAuth } = useApi()
+  const { jobTypes, refreshJobTypes } = useJobTypes(currentUser)
 
   const fetchJobs = useCallback(async () => {
     setLoading(true)
@@ -156,6 +158,7 @@ export default function ClientsList({ currentUser }) {
         payment: updates.payment,
         comments: updates.comments
       })
+      await refreshJobTypes()
       closeEditModal()
     } catch (err) {
       console.error('Error updating job from clients page:', err)
@@ -352,6 +355,7 @@ export default function ClientsList({ currentUser }) {
         key={editingJob?.id || 'clients-editor'}
         job={editingJob}
         clients={clients}
+        jobTypes={jobTypes}
         saving={isSavingJob}
         deleting={isDeletingJob}
         error={editError}
