@@ -4,6 +4,7 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -32,7 +33,8 @@ const NAV_ITEMS = [
   { key: 'calendar', label: 'Calendar' },
   { key: 'jobs', label: 'Jobs' },
   { key: 'jobs-new', label: 'New Job' },
-  { key: 'clients', label: 'Clients' }
+  { key: 'clients', label: 'Clients' },
+  { key: 'billing', label: 'Billing' }
 ]
 
 const JOB_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
@@ -56,6 +58,89 @@ const JOB_TYPE_DEFAULTS = JOB_TYPE_OPTIONS.map((name, index) => ({
   color: JOB_TYPE_COLOR_PRESETS[index],
   sort_order: index
 }))
+const SELF_SERVE_PLAN_CODES = ['free', 'starter', 'team', 'pro']
+const DEFAULT_BILLING_PLANS = [
+  {
+    code: 'free',
+    name: 'Free',
+    priceLabel: '$0',
+    userLimit: 1,
+    monthlyClientLimit: 10,
+    monthlyJobLimit: 25,
+    description: 'Try the full scheduling flow with monthly creation limits.',
+    features: [
+      '1 user',
+      '10 new clients per month',
+      '25 new jobs per month',
+      'Calendar, clients, notes, and payment tracking'
+    ],
+    canSelfServe: true
+  },
+  {
+    code: 'starter',
+    name: 'Starter',
+    priceLabel: '$14.99/mo',
+    userLimit: 1,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: 'Unlimited records for solo operators.',
+    features: [
+      '1 user',
+      'Unlimited clients and jobs',
+      'Custom job types and calendar colors',
+      'Core scheduling workflow'
+    ],
+    canSelfServe: true
+  },
+  {
+    code: 'team',
+    name: 'Team',
+    priceLabel: '$39.99/mo',
+    userLimit: 5,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: 'Shared scheduling for small crews.',
+    features: [
+      'Up to 5 users',
+      'Unlimited clients and jobs',
+      'Shared scheduling foundations',
+      'Built for growing teams'
+    ],
+    canSelfServe: true
+  },
+  {
+    code: 'pro',
+    name: 'Pro',
+    priceLabel: '$79.99/mo',
+    userLimit: 15,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: 'Advanced tools for scaling service businesses.',
+    features: [
+      'Up to 15 users',
+      'Unlimited clients and jobs',
+      'Best fit for automation and advanced workflows',
+      'Mobile and desktop access'
+    ],
+    canSelfServe: true
+  },
+  {
+    code: 'enterprise',
+    name: 'Enterprise',
+    priceLabel: 'From $249/mo',
+    userLimit: null,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: 'Custom onboarding, integrations, and support.',
+    features: [
+      'Custom user limits',
+      'Priority onboarding',
+      'Custom integrations',
+      'Contact sales'
+    ],
+    canSelfServe: false
+  }
+]
 
 const EMPTY_JOB_FORM = {
   name: '',
@@ -285,6 +370,17 @@ const mixColor = (first, second, ratio) => {
     r: Math.round(source.r + ((target.r - source.r) * ratio)),
     g: Math.round(source.g + ((target.g - source.g) * ratio)),
     b: Math.round(source.b + ((target.b - source.b) * ratio))
+  })
+}
+
+const formatBillingResetDate = (value) => {
+  const date = parseDateValue(value)
+  if (!date) return 'Unavailable'
+
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
   })
 }
 
@@ -565,6 +661,11 @@ export default function App() {
   const [jobTypes, setJobTypes] = useState([])
   const [jobTypesLoading, setJobTypesLoading] = useState(false)
   const [jobTypesError, setJobTypesError] = useState('')
+  const [billingSummary, setBillingSummary] = useState(null)
+  const [billingLoading, setBillingLoading] = useState(false)
+  const [billingError, setBillingError] = useState('')
+  const [billingStatus, setBillingStatus] = useState('')
+  const [billingSavingPlanCode, setBillingSavingPlanCode] = useState('')
   const [jobTypeDraft, setJobTypeDraft] = useState({ name: '', color: JOB_TYPE_COLOR_PRESETS[0] })
   const [jobTypeEditingId, setJobTypeEditingId] = useState(null)
   const [jobTypeFormError, setJobTypeFormError] = useState('')
@@ -692,6 +793,45 @@ export default function App() {
     }
   }, [session])
 
+  useEffect(() => {
+    if (!session) {
+      setBillingSummary(null)
+      setBillingError('')
+      setBillingLoading(false)
+      setBillingStatus('')
+      return
+    }
+
+    let active = true
+    const loadBilling = async () => {
+      setBillingLoading(true)
+      setBillingError('')
+
+      try {
+        const response = await apiFetch('/billing/summary', {
+          accessToken: session.accessToken,
+          refreshToken: session.refreshToken,
+          onSessionChange: setSession
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(payload.error || 'Unable to load billing details')
+        if (active) setBillingSummary(payload)
+      } catch (error) {
+        if (active) {
+          setBillingSummary(null)
+          setBillingError(error.message || 'Unable to load billing details')
+        }
+      } finally {
+        if (active) setBillingLoading(false)
+      }
+    }
+
+    loadBilling()
+    return () => {
+      active = false
+    }
+  }, [session])
+
   const clients = useMemo(() => buildClients(jobs), [jobs])
   const jobTypeOptions = useMemo(() => {
     const source = jobTypes.length > 0 ? jobTypes : JOB_TYPE_DEFAULTS
@@ -702,6 +842,9 @@ export default function App() {
       return normalizeJobTypeName(first.name).localeCompare(normalizeJobTypeName(second.name))
     })
   }, [jobTypes])
+  const canManageJobTypes = billingSummary?.entitlements?.canManageJobTypes ?? true
+  const creationBlocked = billingSummary?.entitlements?.creationBlocked ?? false
+  const billingPlans = billingSummary?.plans?.length ? billingSummary.plans : DEFAULT_BILLING_PLANS
 
   const filteredClients = useMemo(() => {
     const query = clientSearch.trim().toLowerCase()
@@ -770,6 +913,63 @@ export default function App() {
     }
   }
 
+  const refreshBilling = async () => {
+    if (!session) return null
+    const response = await apiFetch('/billing/summary', {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      onSessionChange: setSession
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (response.ok) {
+      setBillingSummary(payload)
+      setBillingError('')
+      return payload
+    }
+    setBillingError(payload.error || 'Unable to load billing details')
+    return null
+  }
+
+  const selectPlan = async (planCode) => {
+    if (!session) throw new Error('Please sign in to manage billing')
+
+    setBillingSavingPlanCode(planCode)
+    setBillingStatus('')
+    try {
+      const response = await apiFetch('/billing/subscription', {
+        method: 'PUT',
+        body: JSON.stringify({ planCode }),
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        onSessionChange: setSession
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to update plan')
+      }
+      if (payload.checkoutUrl) {
+        setBillingStatus('Opening Stripe Checkout...')
+        await Linking.openURL(payload.checkoutUrl)
+        return payload
+      }
+      if (payload.portalUrl) {
+        setBillingStatus('Opening Stripe customer portal...')
+        await Linking.openURL(payload.portalUrl)
+        return payload
+      }
+      if (payload.subscription) {
+        setBillingSummary(payload.subscription)
+      }
+      setBillingStatus(payload.message || 'Plan updated')
+      return payload.subscription || null
+    } catch (error) {
+      setBillingStatus(error.message || 'Unable to update plan')
+      return null
+    } finally {
+      setBillingSavingPlanCode('')
+    }
+  }
+
   const createJobType = async ({ name, color }) => {
     if (!session) throw new Error('Please sign in to manage job types')
 
@@ -786,6 +986,7 @@ export default function App() {
 
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) {
+      if (payload.subscription) setBillingSummary(payload.subscription)
       throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create job type')
     }
 
@@ -809,6 +1010,7 @@ export default function App() {
 
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) {
+      if (payload.subscription) setBillingSummary(payload.subscription)
       throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to update job type')
     }
 
@@ -828,6 +1030,7 @@ export default function App() {
 
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) {
+      if (payload.subscription) setBillingSummary(payload.subscription)
       throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to delete job type')
     }
 
@@ -851,6 +1054,11 @@ export default function App() {
   }
 
   const submitJobTypeDraft = async () => {
+    if (!canManageJobTypes) {
+      setJobTypeFormError('Custom job types unlock on Starter and above.')
+      return
+    }
+
     const name = normalizeJobTypeName(jobTypeDraft.name)
     if (!name) {
       setJobTypeFormError('Enter a job type name')
@@ -875,6 +1083,11 @@ export default function App() {
   }
 
   const removeJobType = async (jobType) => {
+    if (!canManageJobTypes) {
+      setJobTypeFormError('Custom job types unlock on Starter and above.')
+      return
+    }
+
     Alert.alert(
       'Delete job type?',
       `Delete the ${jobType.name} job type?`,
@@ -1075,6 +1288,14 @@ export default function App() {
       return
     }
 
+    if (creationBlocked) {
+      setJobStatus({
+        type: 'error',
+        message: `This workspace has reached its monthly free-tier limit. Upgrade or wait for the reset on ${formatBillingResetDate(billingSummary?.currentPeriodEndsAt)}.`
+      })
+      return
+    }
+
     setJobStatus({ type: 'info', message: 'Saving appointment...' })
     try {
       const response = await apiFetch('/jobs', {
@@ -1085,7 +1306,11 @@ export default function App() {
         onSessionChange: setSession
       })
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create job')
+      if (!response.ok) {
+        if (payload.subscription) setBillingSummary(payload.subscription)
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create job')
+      }
+      if (payload.subscription) setBillingSummary(payload.subscription)
       setJobForm(EMPTY_JOB_FORM)
       setJobSuggestionField(null)
       setJobStatus({ type: 'success', message: 'Job created successfully' })
@@ -1093,6 +1318,7 @@ export default function App() {
       setActiveTab('calendar')
       await refreshJobs()
       await refreshJobTypes()
+      await refreshBilling()
     } catch (error) {
       setJobStatus({ type: 'error', message: toFriendlyJobError(error.message) })
     }
@@ -1565,12 +1791,32 @@ export default function App() {
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
         >
-          <Panel title={activeTab === 'jobs-new' ? 'Create a new job' : activeTab === 'jobs' ? 'Job dashboard' : activeTab === 'clients' ? 'Client relationships' : 'Calendar overview'} subtitle="Workspace overview">
+          <Panel title={activeTab === 'jobs-new' ? 'Create a new job' : activeTab === 'jobs' ? 'Job dashboard' : activeTab === 'clients' ? 'Client relationships' : activeTab === 'billing' ? 'Billing and plans' : 'Calendar overview'} subtitle="Workspace overview">
             <Text style={commonStyles.text}>Signed in as {session.user?.name || session.user?.email || 'Workspace user'}.</Text>
+            {billingSummary ? (
+              <>
+                <Text style={commonStyles.text}>
+                  {billingSummary.planName} plan{billingSummary.usage?.monthlyClientLimit === null
+                    ? ' with unlimited records.'
+                    : ` with ${billingSummary.usage.monthlyClientCreations}/${billingSummary.usage.monthlyClientLimit} clients and ${billingSummary.usage.monthlyJobCreations}/${billingSummary.usage.monthlyJobLimit} jobs used this month.`}
+                </Text>
+                <Text style={commonStyles.helperText}>Resets on {formatBillingResetDate(billingSummary.currentPeriodEndsAt)}.</Text>
+              </>
+            ) : null}
             <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={logout}>
               <Text style={commonStyles.buttonText}>Logout</Text>
             </Pressable>
           </Panel>
+          {billingSummary?.entitlements?.creationBlocked ? (
+            <Panel title="Upgrade to keep creating" subtitle="Free plan limit reached">
+              <Text style={commonStyles.text}>
+                New client and job creation is paused until {formatBillingResetDate(billingSummary.currentPeriodEndsAt)}.
+              </Text>
+              <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={() => setActiveTab('billing')}>
+                <Text style={commonStyles.buttonText}>Open billing</Text>
+              </Pressable>
+            </Panel>
+          ) : null}
           <View style={commonStyles.panel}>
             <Text style={commonStyles.muted}>Navigation</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -1592,10 +1838,28 @@ export default function App() {
 
           {activeTab === 'jobs-new' ? (
             <>
+              {billingSummary ? (
+                <Panel title="Plan usage" subtitle={billingSummary.planName}>
+                  <Text style={commonStyles.text}>
+                    {billingSummary.usage?.monthlyClientLimit === null
+                      ? 'Unlimited clients and jobs are available on this plan.'
+                      : `${billingSummary.usage.monthlyClientCreations}/${billingSummary.usage.monthlyClientLimit} clients and ${billingSummary.usage.monthlyJobCreations}/${billingSummary.usage.monthlyJobLimit} jobs used this month.`}
+                  </Text>
+                  <Text style={commonStyles.helperText}>Resets on {formatBillingResetDate(billingSummary.currentPeriodEndsAt)}.</Text>
+                  <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={() => setActiveTab('billing')}>
+                    <Text style={commonStyles.buttonText}>Manage billing</Text>
+                  </Pressable>
+                </Panel>
+              ) : null}
               <Panel title="Job types" subtitle="Customize">
                 <Text style={commonStyles.text}>
                   Define the labels your business uses and choose the color that appears in the calendar.
                 </Text>
+                {!canManageJobTypes ? (
+                  <Text style={commonStyles.helperText}>
+                    Custom job types and color management unlock on Starter and above.
+                  </Text>
+                ) : null}
                 <FormField
                   label="Name"
                   value={jobTypeDraft.name}
@@ -1618,6 +1882,7 @@ export default function App() {
                             setJobTypeDraft((current) => ({ ...current, color }))
                             setJobTypeFormError('')
                           }}
+                          disabled={!canManageJobTypes || jobTypeSaving}
                         />
                       )
                     })}
@@ -1638,7 +1903,7 @@ export default function App() {
                     <Pressable
                       style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
                       onPress={resetJobTypeDraft}
-                      disabled={jobTypeSaving}
+                      disabled={jobTypeSaving || !canManageJobTypes}
                     >
                       <Text style={commonStyles.buttonText}>Cancel edit</Text>
                     </Pressable>
@@ -1646,7 +1911,7 @@ export default function App() {
                   <Pressable
                     style={[commonStyles.button, commonStyles.buttonPrimary, styles.jobTypeActionButton]}
                     onPress={submitJobTypeDraft}
-                    disabled={jobTypeSaving}
+                    disabled={jobTypeSaving || !canManageJobTypes}
                   >
                     <Text style={commonStyles.buttonText}>{jobTypeSaving ? 'Saving...' : jobTypeEditingId ? 'Save job type' : 'Add job type'}</Text>
                   </Pressable>
@@ -1669,10 +1934,10 @@ export default function App() {
                             <Text style={[commonStyles.text, { color: palette.text }]}>{normalizeJobTypeColor(jobType.color) || palette.background}</Text>
                           </View>
                           <View style={styles.jobTypeListActions}>
-                            <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => startEditingJobType(jobType)}>
+                            <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => startEditingJobType(jobType)} disabled={!canManageJobTypes}>
                               <Text style={styles.inlineActionText}>Edit</Text>
                             </Pressable>
-                            <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => removeJobType(jobType)}>
+                            <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => removeJobType(jobType)} disabled={!canManageJobTypes}>
                               <Text style={styles.inlineActionText}>Delete</Text>
                             </Pressable>
                           </View>
@@ -1765,7 +2030,9 @@ export default function App() {
                   setJobStatus(null)
                 }} error={jobErrors.comments} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
                 {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
-                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob}><Text style={commonStyles.buttonText}>Save appointment</Text></Pressable>
+                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob} disabled={creationBlocked}>
+                  <Text style={commonStyles.buttonText}>{creationBlocked ? 'Upgrade or wait for reset' : 'Save appointment'}</Text>
+                </Pressable>
               </View>
             </>
           ) : null}
@@ -1812,6 +2079,102 @@ export default function App() {
                   ))}
                 </View>
               ))}
+            </>
+          ) : null}
+
+          {activeTab === 'billing' ? (
+            <>
+              <Panel title="Current plan" subtitle={billingSummary?.planName || 'Billing'}>
+                {billingLoading && !billingSummary ? <Text style={commonStyles.text}>Loading billing details...</Text> : null}
+                {billingError ? <Text style={commonStyles.errorText}>{billingError}</Text> : null}
+                {billingSummary ? (
+                  <>
+                    <Text style={commonStyles.text}>
+                      {billingSummary.planName} {billingSummary.priceLabel}
+                    </Text>
+                    <Text style={commonStyles.helperText}>
+                      Resets on {formatBillingResetDate(billingSummary.currentPeriodEndsAt)}.
+                    </Text>
+                    {billingSummary.checkoutMode === 'manual_preview' ? (
+                      <Text style={commonStyles.helperText}>
+                        Plan changes save immediately for now while Stripe checkout is still being wired in.
+                      </Text>
+                    ) : null}
+                    <View style={styles.billingUsageList}>
+                      <View style={commonStyles.chip}>
+                        <Text style={commonStyles.chipText}>
+                          {billingSummary.usage.monthlyClientLimit === null
+                            ? 'Unlimited clients'
+                            : `${billingSummary.usage.monthlyClientCreations}/${billingSummary.usage.monthlyClientLimit} clients`}
+                        </Text>
+                      </View>
+                      <View style={commonStyles.chip}>
+                        <Text style={commonStyles.chipText}>
+                          {billingSummary.usage.monthlyJobLimit === null
+                            ? 'Unlimited jobs'
+                            : `${billingSummary.usage.monthlyJobCreations}/${billingSummary.usage.monthlyJobLimit} jobs`}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
+                ) : null}
+              </Panel>
+              {!billingSummary ? (
+                <Panel>
+                  <Text style={commonStyles.helperText}>
+                    Showing the default plan catalog while billing details load. If this persists, check the backend log for the billing summary error.
+                  </Text>
+                </Panel>
+              ) : null}
+              {billingPlans.map((plan) => {
+                const isCurrent = billingSummary?.planCode === plan.code
+                const isSelectable = SELF_SERVE_PLAN_CODES.includes(plan.code)
+                return (
+                  <View key={plan.code} style={commonStyles.panel}>
+                    <View style={commonStyles.rowBetween}>
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <Text style={commonStyles.sectionTitle}>{plan.name}</Text>
+                        <Text style={commonStyles.text}>{plan.description}</Text>
+                      </View>
+                      <Text style={commonStyles.heading3}>{plan.priceLabel}</Text>
+                    </View>
+                    <Text style={commonStyles.helperText}>
+                      {plan.userLimit === null ? 'Custom seats' : `${plan.userLimit} user${plan.userLimit === 1 ? '' : 's'}`}
+                    </Text>
+                    {Array.isArray(plan.features) ? plan.features.map((feature) => (
+                      <Text key={`${plan.code}-${feature}`} style={commonStyles.text}>• {feature}</Text>
+                    )) : null}
+                    {isSelectable ? (
+                      <Pressable
+                        style={[commonStyles.button, isCurrent ? commonStyles.buttonSecondary : commonStyles.buttonPrimary]}
+                        onPress={() => selectPlan(plan.code)}
+                        disabled={Boolean(billingSavingPlanCode)}
+                      >
+                        <Text style={commonStyles.buttonText}>
+                          {billingSavingPlanCode === plan.code
+                            ? 'Saving...'
+                            : isCurrent
+                              ? 'Current plan'
+                              : billingSummary?.planCode === 'free'
+                                ? `Choose ${plan.name}`
+                                : 'Open Stripe'}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} disabled>
+                        <Text style={commonStyles.buttonText}>Contact sales</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )
+              })}
+              {billingStatus ? (
+                <Panel>
+                  <Text style={billingStatus.toLowerCase().includes('unable') ? commonStyles.errorText : commonStyles.successText}>
+                    {billingStatus}
+                  </Text>
+                </Panel>
+              ) : null}
             </>
           ) : null}
 
@@ -2610,6 +2973,11 @@ const styles = StyleSheet.create({
   },
   calendarLegendSwatch: { width: 10, height: 10, borderRadius: 999 },
   calendarLegendText: { color: colors.heading, fontSize: 11, fontWeight: '700', flexShrink: 1 },
+  billingUsageList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
   colorPresetRow: {
     flexDirection: 'row',
     gap: 10,

@@ -147,7 +147,7 @@ export default function LoginPage({ onLogin }) {
           <h2>{isCreateMode ? 'Create your account' : 'Welcome back'}</h2>
           <p className="login-subtitle">
             {isCreateMode
-              ? 'Create an account to manage clients, track appointments, and keep every job organized in one place.'
+              ? 'Create an account to start on the free plan, manage clients, track appointments, and keep every job organized in one place.'
               : 'Sign in to manage clients, review jobs, and stay on top of your upcoming appointments.'}
           </p>
         </div>

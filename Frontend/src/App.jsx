@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BrowserRouter as Router, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 import JobForm from './JobForm'
@@ -6,8 +6,10 @@ import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
 import CalendarPage from './CalendarPage'
+import BillingPage from './BillingPage'
 import { API_BASE, getTokenExpiry } from './api'
 import { ApiContext } from './apiContext'
+import useSubscription from './useSubscription'
 
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 
@@ -15,7 +17,8 @@ const NAV_ITEMS = [
   { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
   { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
   { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
-  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' }
+  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' },
+  { label: 'Billing', path: '/billing', description: 'Check plan limits, reset dates, and upgrades.' }
 ]
 
 const PAGE_META = {
@@ -34,6 +37,10 @@ const PAGE_META = {
   '/calendar': {
     title: 'Calendar overview',
     description: 'See every scheduled job in daily, weekly, monthly, and yearly calendar views.'
+  },
+  '/billing': {
+    title: 'Billing and plans',
+    description: 'Review your plan, usage, monthly reset date, and upgrade options.'
   }
 }
 
@@ -186,6 +193,13 @@ function AppContent() {
     },
     [session?.accessToken, refreshAccessToken]
   )
+  const {
+    summary: subscriptionSummary,
+    loading: subscriptionLoading,
+    error: subscriptionError,
+    refreshSubscription,
+    changePlan
+  } = useSubscription(currentUser, fetchWithAuth)
 
   const handleLogout = async () => {
     try {
@@ -206,8 +220,24 @@ function AppContent() {
   }
 
   const apiContextValue = useMemo(
-    () => ({ fetchWithAuth, session }),
-    [fetchWithAuth, session]
+    () => ({
+      fetchWithAuth,
+      session,
+      subscriptionSummary,
+      subscriptionLoading,
+      subscriptionError,
+      refreshSubscription,
+      changePlan
+    }),
+    [
+      changePlan,
+      fetchWithAuth,
+      refreshSubscription,
+      session,
+      subscriptionError,
+      subscriptionLoading,
+      subscriptionSummary
+    ]
   )
 
   return (
@@ -258,6 +288,30 @@ function AppContent() {
               </div>
 
               <div className="page-header-account">
+                {subscriptionSummary ? (
+                  <button
+                    type="button"
+                    className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
+                    onClick={() => navigate('/billing')}
+                  >
+                    <span className="sidebar-section-label">Plan</span>
+                    <strong>{subscriptionSummary.planName}</strong>
+                    <span>{subscriptionSummary.priceLabel}</span>
+                    <span>
+                      Resets {new Date(`${subscriptionSummary.currentPeriodEndsAt}T00:00:00`).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                      })}
+                    </span>
+                    {subscriptionSummary.usage?.monthlyClientLimit !== null ? (
+                      <span>
+                        {subscriptionSummary.usage.monthlyClientCreations}/{subscriptionSummary.usage.monthlyClientLimit} clients | {subscriptionSummary.usage.monthlyJobCreations}/{subscriptionSummary.usage.monthlyJobLimit} jobs
+                      </span>
+                    ) : (
+                      <span>Unlimited records</span>
+                    )}
+                  </button>
+                ) : null}
                 <p className="sidebar-section-label">Signed in</p>
                 {currentUser ? (
                   <div className="user-menu-container">
@@ -303,6 +357,7 @@ function AppContent() {
               <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
               <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
               <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
+              <Route path="/billing" element={<BillingPage />} />
             </Routes>
           </ApiContext.Provider>
         </section>
@@ -312,3 +367,4 @@ function AppContent() {
 }
 
 export default App
+

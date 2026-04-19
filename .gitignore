@@ -12,6 +12,9 @@ dist
 dist-ssr
 .expo/
 *.local
+.agents/
+.claude/
+skills-lock.json
 
 # Editor directories and files
 .vscode/*

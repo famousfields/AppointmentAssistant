@@ -34,7 +34,7 @@ export default function JobForm({ currentUser }) {
   const navigate = useNavigate()
   const redirectTimer = useRef(null)
   const isInitialMount = useRef(true)
-  const { fetchWithAuth } = useApi()
+  const { fetchWithAuth, subscriptionSummary, refreshSubscription } = useApi()
   const clients = useMemo(() => buildClients(clientJobs), [clientJobs])
   const {
     jobTypes,
@@ -46,6 +46,13 @@ export default function JobForm({ currentUser }) {
     deleteJobType
   } = useJobTypes(currentUser)
   const jobTypeSuggestions = useMemo(() => buildJobTypeSuggestionSet(jobTypes), [jobTypes])
+  const canManageJobTypes = subscriptionSummary?.entitlements?.canManageJobTypes ?? true
+  const creationBlocked = subscriptionSummary?.entitlements?.creationBlocked ?? false
+  const jobTypePanelError =
+    jobTypesError ||
+    (!canManageJobTypes && currentUser
+      ? 'Custom job types and color management unlock on Starter and above.'
+      : '')
 
   const validateField = (name, value) => {
     switch (name) {
@@ -131,6 +138,7 @@ export default function JobForm({ currentUser }) {
         setFormData(EMPTY_FORM_DATA)
         setSuggestionField(null)
         await refreshJobTypes()
+        await refreshSubscription()
         redirectTimer.current = setTimeout(() => {
           navigate('/jobs')
         }, 1000)
@@ -139,6 +147,7 @@ export default function JobForm({ currentUser }) {
           data.errors?.[0]?.msg || data.error || data.message || 'Unable to create job'
         setErrors((prev) => ({ ...prev, submit: errorMessage }))
         setSuccessMessage('')
+        await refreshSubscription()
       }
     } catch (err) {
       console.error('Network error:', err)
@@ -239,8 +248,13 @@ export default function JobForm({ currentUser }) {
       <JobTypeManager
         jobTypes={jobTypes}
         loading={jobTypesLoading}
-        error={jobTypesError}
-        disabled={!currentUser}
+        error={jobTypePanelError}
+        disabled={!currentUser || !canManageJobTypes}
+        disabledMessage={
+          !currentUser
+            ? 'Log in to manage job types.'
+            : 'Upgrade to Starter or above to create custom job types and colors.'
+        }
         onCreate={createJobType}
         onUpdate={updateJobType}
         onDelete={deleteJobType}
@@ -257,6 +271,20 @@ export default function JobForm({ currentUser }) {
         {!currentUser && (
           <div className="form-error-message">
             Please log in before creating a job.
+          </div>
+        )}
+
+        {currentUser && subscriptionSummary && (
+          <div className={`subscription-notice${creationBlocked ? ' subscription-notice--alert' : ''}`}>
+            <strong>{subscriptionSummary.planName} plan</strong>
+            <span>
+              {subscriptionSummary.usage.monthlyClientLimit === null
+                ? 'Unlimited clients and jobs are active for this workspace.'
+                : `${subscriptionSummary.usage.monthlyClientCreations}/${subscriptionSummary.usage.monthlyClientLimit} clients and ${subscriptionSummary.usage.monthlyJobCreations}/${subscriptionSummary.usage.monthlyJobLimit} jobs used this month.`}
+            </span>
+            <button type="button" className="comments-button comments-button--ghost" onClick={() => navigate('/billing')}>
+              View billing
+            </button>
           </div>
         )}
 
@@ -475,10 +503,10 @@ export default function JobForm({ currentUser }) {
 
         <button
           type="submit"
-          disabled={hasErrors || !currentUser}
+          disabled={hasErrors || !currentUser || creationBlocked}
           className="form-submit-button"
         >
-          Save appointment
+          {creationBlocked ? 'Upgrade or wait for reset' : 'Save appointment'}
         </button>
       </form>
     </div>

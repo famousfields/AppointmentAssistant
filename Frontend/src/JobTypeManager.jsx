@@ -6,7 +6,16 @@ const EMPTY_DRAFT = {
   color: '#6d7cff'
 }
 
-export default function JobTypeManager({ jobTypes = [], loading = false, error = '', disabled = false, onCreate, onUpdate, onDelete }) {
+export default function JobTypeManager({
+  jobTypes = [],
+  loading = false,
+  error = '',
+  disabled = false,
+  disabledMessage = 'Log in to manage job types.',
+  onCreate,
+  onUpdate,
+  onDelete
+}) {
   const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [editingId, setEditingId] = useState(null)
   const [submitError, setSubmitError] = useState('')
@@ -120,7 +129,7 @@ export default function JobTypeManager({ jobTypes = [], loading = false, error =
 
         {submitError ? <p className="form-error">{submitError}</p> : null}
         {error ? <p className="form-error">{error}</p> : null}
-        {disabled ? <p className="form-hint">Log in to manage job types.</p> : null}
+        {disabled ? <p className="form-hint">{disabledMessage}</p> : null}
       </form>
 
       {loading ? (
