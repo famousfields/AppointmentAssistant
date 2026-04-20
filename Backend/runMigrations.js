@@ -3,6 +3,38 @@ const path = require("path");
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations");
 
+function normalizeStatement(statement = "") {
+  return String(statement)
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function isIgnorableMigrationError(statement, error) {
+  const normalized = normalizeStatement(statement);
+
+  // Older MySQL versions do not support some IF NOT EXISTS / IF EXISTS patterns,
+  // so replaying migrations against partially migrated databases needs to be tolerant.
+  if (error.code === "ER_DUP_FIELDNAME") {
+    return true;
+  }
+
+  if (error.code === "ER_CANT_DROP_FIELD_OR_KEY" && normalized.includes("DROP INDEX")) {
+    return true;
+  }
+
+  if (
+    (error.code === "ER_DUP_KEYNAME" || error.code === "ER_FK_DUP_NAME") &&
+    (normalized.includes("ADD UNIQUE KEY") ||
+      normalized.includes("ADD KEY") ||
+      normalized.includes("ADD CONSTRAINT"))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 async function ensureMigrationsTable(db) {
   await db.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -47,10 +79,10 @@ async function runMigrations(db) {
         try {
           await db.query(statement);
         } catch (error) {
-          // MySQL < 8.0 doesn't support `ADD COLUMN IF NOT EXISTS`.
-          // If a migration is replayed against an older DB that already has
-          // the column, treat duplicate-column errors as no-op.
-          if (error.code === "ER_DUP_FIELDNAME") {
+          if (isIgnorableMigrationError(statement, error)) {
+            console.warn(
+              `Skipping already-applied migration statement in ${filename}: ${error.code}`
+            );
             continue;
           }
           throw error;
