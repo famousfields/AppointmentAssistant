@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import ClientSuggestions from './ClientSuggestions'
-import { applyClientSuggestion, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
+import {
+  applyClientSuggestion,
+  formatPhonePreview,
+  normalizePhoneDigits
+} from './clientUtils'
 import { formatDateInputValue, parseDateValue } from './dateUtils'
 import { buildJobTypeSuggestionSet } from './jobTypes'
 import GoogleMapsLink from './GoogleMapsLink'
+import { JobStatusChips, SectionCard } from './productUi'
 
 const STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
 const PHONE_EXAMPLE = '(555) 123-4567'
@@ -20,7 +25,46 @@ const buildFormState = (job) => ({
   comments: job?.comments || ''
 })
 
-export default function JobEditorModal({ job, clients = [], jobTypes = [], saving, deleting = false, error, onClose, onSave, onDelete }) {
+const formatSchedulePreview = (jobDate, startTime) => {
+  const date = parseDateValue(jobDate)
+  const dateLabel = date
+    ? date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      })
+    : 'Date not set'
+
+  if (!startTime) return `${dateLabel} | Time not set`
+
+  const [hoursText = '0', minutesText = '00'] = String(startTime).split(':')
+  const hours = Number(hoursText)
+  const minutes = Number(minutesText)
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return `${dateLabel} | Time not set`
+
+  const start = new Date(2000, 0, 1, hours, minutes)
+  const end = new Date(2000, 0, 1, hours + 1, minutes)
+
+  return `${dateLabel} | ${start.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })} - ${end.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`
+}
+
+export default function JobEditorModal({
+  job,
+  clients = [],
+  jobTypes = [],
+  saving,
+  deleting = false,
+  error,
+  onClose,
+  onSave,
+  onDelete
+}) {
   const [formData, setFormData] = useState(() => buildFormState(job))
   const [fieldErrors, setFieldErrors] = useState({})
   const [suggestionField, setSuggestionField] = useState(null)
@@ -66,6 +110,12 @@ export default function JobEditorModal({ job, clients = [], jobTypes = [], savin
     setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, value) }))
   }
 
+  const applyExistingClient = (client) => {
+    setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
+    setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
+    setSuggestionField(null)
+  }
+
   const handleSubmit = async (event) => {
     event.preventDefault()
 
@@ -93,230 +143,259 @@ export default function JobEditorModal({ job, clients = [], jobTypes = [], savin
     })
   }
 
+  const scheduleLabel = formatSchedulePreview(formData.jobDate, formData.startTime)
+
   return (
     <div className="comments-modal-backdrop" onClick={onClose}>
       <div className="comments-modal job-editor-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="comments-modal-header">
-          <h3>Edit job for {job.name}</h3>
-          <p className="comments-modal-subtitle">
-            Update client details, scheduling, payment, and notes in one place.
-          </p>
+        <div className="comments-modal-header job-editor-modal__header">
+          <div>
+            <p className="section-card__eyebrow">Job Command Center</p>
+            <h3>Edit job for {job.name}</h3>
+            <p className="comments-modal-subtitle">
+              Adjust client details, scheduling, payment, and notes without losing context.
+            </p>
+          </div>
+          <JobStatusChips job={{ ...job, ...formData, payment: formData.payment }} />
         </div>
 
         <form className="job-editor-form" onSubmit={handleSubmit}>
+          <SectionCard
+            eyebrow="Client"
+            title="Who and where"
+            description="Update the customer record or switch to an existing client when the details match."
+            compact
+          >
+            <div className="form-grid form-grid--two">
               <div className="form-group">
                 <label htmlFor="edit-name">Client name</label>
-            <input
-              id="edit-name"
-              name="name"
-              value={formData.name}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField('name')
-              }}
-              placeholder="Jane Smith"
-              autoComplete="name"
-            />
-            {fieldErrors.name && <p className="form-error">{fieldErrors.name}</p>}
-          </div>
-          <ClientSuggestions
-            clients={clients}
-            query={formData.name}
-            field="name"
-            visible={suggestionField === 'name'}
-            onSelect={(client) => {
-              setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
-              setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
-              setSuggestionField(null)
-            }}
-          />
+                <input
+                  id="edit-name"
+                  name="name"
+                  value={formData.name}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField('name')
+                  }}
+                  placeholder="Jane Smith"
+                  autoComplete="name"
+                />
+                {fieldErrors.name && <p className="form-error">{fieldErrors.name}</p>}
+              </div>
 
-          <div className="form-group">
-            <label htmlFor="edit-phone">Phone</label>
-            <input
-              id="edit-phone"
-              name="phone"
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              placeholder={PHONE_EXAMPLE}
-              maxLength={15}
-              value={formData.phone}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField('phone')
-              }}
-            />
-            <p className="form-hint">Enter digits only. Preview: {formatPhonePreview(formData.phone)}</p>
-            {fieldErrors.phone && <p className="form-error">{fieldErrors.phone}</p>}
-          </div>
-          <ClientSuggestions
-            clients={clients}
-            query={formData.phone}
-            field="phone"
-            visible={suggestionField === 'phone'}
-            onSelect={(client) => {
-              setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
-              setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
-              setSuggestionField(null)
-            }}
-          />
+              <div className="form-group">
+                <label htmlFor="edit-phone">Phone</label>
+                <input
+                  id="edit-phone"
+                  name="phone"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder={PHONE_EXAMPLE}
+                  maxLength={15}
+                  value={formData.phone}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField('phone')
+                  }}
+                />
+                <p className="form-hint">Digits only. Preview: {formatPhonePreview(formData.phone)}</p>
+                {fieldErrors.phone && <p className="form-error">{fieldErrors.phone}</p>}
+              </div>
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="edit-address">Address</label>
-            <input
-              id="edit-address"
-              name="address"
-              value={formData.address}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField('address')
-              }}
-              placeholder="123 Main St, Springfield, IL 62704"
-              autoComplete="street-address"
+            <ClientSuggestions
+              clients={clients}
+              query={suggestionField === 'phone' ? formData.phone : formData.name}
+              field={suggestionField === 'phone' ? 'phone' : 'name'}
+              visible={suggestionField === 'name' || suggestionField === 'phone'}
+              onSelect={applyExistingClient}
+              onCreateNew={() => setSuggestionField(null)}
+              createLabel="Keep current client as entered"
             />
-            <GoogleMapsLink address={formData.address} />
-            <p className="form-hint">Include street, city, and any unit details so the crew can find the appointment quickly.</p>
-            {fieldErrors.address && <p className="form-error">{fieldErrors.address}</p>}
-          </div>
-          <ClientSuggestions
-            clients={clients}
-            query={formData.address}
-            field="address"
-            visible={suggestionField === 'address'}
-            onSelect={(client) => {
-              setFormData((prev) => ({ ...prev, ...applyClientSuggestion(client) }))
-              setFieldErrors((prev) => ({ ...prev, name: '', phone: '', address: '' }))
-              setSuggestionField(null)
-            }}
-          />
 
-          <div className="form-group">
-            <label htmlFor="edit-job-type">Job type</label>
-            <input
-              id="edit-job-type"
-              name="jobType"
-              list="edit-job-type-options"
-              value={formData.jobType}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField(null)
-              }}
-              placeholder="Mulch installation"
+            <div className="form-group">
+              <label htmlFor="edit-address">Address</label>
+              <input
+                id="edit-address"
+                name="address"
+                value={formData.address}
+                onChange={(event) => {
+                  handleChange(event)
+                  setSuggestionField('address')
+                }}
+                placeholder="123 Main St, Springfield, IL 62704"
+                autoComplete="street-address"
+              />
+              <div className="form-inline-actions">
+                <GoogleMapsLink address={formData.address} />
+                <span className="form-hint">Keep the routeable service address current for the field team.</span>
+              </div>
+              {fieldErrors.address && <p className="form-error">{fieldErrors.address}</p>}
+            </div>
+
+            <ClientSuggestions
+              clients={clients}
+              query={formData.address}
+              field="address"
+              visible={suggestionField === 'address'}
+              onSelect={applyExistingClient}
+              onCreateNew={() => setSuggestionField(null)}
+              createLabel="Use this address"
             />
-            <datalist id="edit-job-type-options">
-              {jobTypeSuggestions.map((jobType) => (
-                <option key={jobType} value={jobType} />
-              ))}
-            </datalist>
-            <p className="form-hint">Job types are business-specific. New names are accepted and can be given a color in the Job Types panel.</p>
-            {fieldErrors.jobType && <p className="form-error">{fieldErrors.jobType}</p>}
-          </div>
+          </SectionCard>
 
-          <div className="form-group">
-            <label htmlFor="edit-job-date">Date</label>
-            <input
-              id="edit-job-date"
-              name="jobDate"
-              type="date"
-              value={formData.jobDate}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField(null)
-              }}
-            />
-            {fieldErrors.jobDate && <p className="form-error">{fieldErrors.jobDate}</p>}
-          </div>
+          <SectionCard
+            eyebrow="Schedule"
+            title="When the team is expected"
+            description={scheduleLabel}
+            compact
+          >
+            <div className="form-grid form-grid--three">
+              <div className="form-group">
+                <label htmlFor="edit-job-type">Job type</label>
+                <input
+                  id="edit-job-type"
+                  name="jobType"
+                  list="edit-job-type-options"
+                  value={formData.jobType}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField(null)
+                  }}
+                  placeholder="Mulch installation"
+                />
+                <datalist id="edit-job-type-options">
+                  {jobTypeSuggestions.map((jobType) => (
+                    <option key={jobType} value={jobType} />
+                  ))}
+                </datalist>
+                <p className="form-hint">Keep the work type specific so dispatch and reporting stay clear.</p>
+                {fieldErrors.jobType && <p className="form-error">{fieldErrors.jobType}</p>}
+              </div>
 
-          <div className="form-group">
-            <label htmlFor="edit-start-time">Start time</label>
-            <input
-              id="edit-start-time"
-              name="startTime"
-              type="time"
-              value={formData.startTime}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField(null)
-              }}
-            />
-            <p className="form-hint">Each job reserves a one-hour timeslot starting at this time.</p>
-            {fieldErrors.startTime && <p className="form-error">{fieldErrors.startTime}</p>}
-          </div>
+              <div className="form-group">
+                <label htmlFor="edit-job-date">Date</label>
+                <input
+                  id="edit-job-date"
+                  name="jobDate"
+                  type="date"
+                  value={formData.jobDate}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField(null)
+                  }}
+                />
+                {fieldErrors.jobDate && <p className="form-error">{fieldErrors.jobDate}</p>}
+              </div>
 
-          <div className="form-group">
-            <label htmlFor="edit-status">Status</label>
-            <select
-              id="edit-status"
-              name="status"
-              className="jobs-status-select"
-              value={formData.status}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField(null)
-              }}
-            >
-              {STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="form-group">
+                <label htmlFor="edit-start-time">Start time</label>
+                <input
+                  id="edit-start-time"
+                  name="startTime"
+                  type="time"
+                  value={formData.startTime}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField(null)
+                  }}
+                />
+                <p className="form-hint">The schedule assumes a one-hour visit starting here.</p>
+                {fieldErrors.startTime && <p className="form-error">{fieldErrors.startTime}</p>}
+              </div>
+            </div>
+          </SectionCard>
 
-          <div className="form-group">
-            <label htmlFor="edit-payment">Payment</label>
-            <input
-              id="edit-payment"
-              name="payment"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={formData.payment}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField(null)
-              }}
-            />
-            {fieldErrors.payment && <p className="form-error">{fieldErrors.payment}</p>}
-          </div>
+          <SectionCard
+            eyebrow="Revenue"
+            title="Status, payment, and notes"
+            description="These fields should make invoicing and follow-up obvious for the office."
+            compact
+          >
+            <div className="form-grid form-grid--three">
+              <div className="form-group">
+                <label htmlFor="edit-status">Status</label>
+                <select
+                  id="edit-status"
+                  name="status"
+                  className="jobs-status-select"
+                  value={formData.status}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField(null)
+                  }}
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="form-group">
-            <label htmlFor="edit-comments">Comments</label>
-            <textarea
-              id="edit-comments"
-              name="comments"
-              value={formData.comments}
-              onChange={(event) => {
-                handleChange(event)
-                setSuggestionField(null)
-              }}
-              placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
-            />
-            <p className="form-hint">Add gate codes, parking notes, scope details, or anything the team should know before arrival.</p>
-            {fieldErrors.comments && <p className="form-error">{fieldErrors.comments}</p>}
-          </div>
+              <div className="form-group">
+                <label htmlFor="edit-payment">Payment</label>
+                <input
+                  id="edit-payment"
+                  name="payment"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={formData.payment}
+                  onChange={(event) => {
+                    handleChange(event)
+                    setSuggestionField(null)
+                  }}
+                />
+                {fieldErrors.payment && <p className="form-error">{fieldErrors.payment}</p>}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="edit-comments">Comments</label>
+              <textarea
+                id="edit-comments"
+                name="comments"
+                value={formData.comments}
+                onChange={(event) => {
+                  handleChange(event)
+                  setSuggestionField(null)
+                }}
+                placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
+              />
+              <p className="form-hint">Keep notes crisp and operational so they are usable in the field.</p>
+              {fieldErrors.comments && <p className="form-error">{fieldErrors.comments}</p>}
+            </div>
+          </SectionCard>
 
           {error && <p className="comments-modal-error">{error}</p>}
 
-          <div className="comments-modal-actions">
-            <button
-              type="button"
-              className="comments-modal-button comments-modal-button--ghost"
-              onClick={onClose}
-              disabled={saving || deleting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="comments-modal-button comments-modal-button--primary"
-              disabled={saving || deleting}
-            >
-              {saving ? 'Saving...' : 'Save changes'}
-            </button>
+          <div className="job-editor-footer">
+            <div className="job-editor-footer__summary">
+              <strong>{scheduleLabel}</strong>
+              <span>{formData.address || 'Address not set yet'}</span>
+            </div>
+            <div className="comments-modal-actions">
+              <button
+                type="button"
+                className="comments-modal-button comments-modal-button--ghost"
+                onClick={onClose}
+                disabled={saving || deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="comments-modal-button comments-modal-button--primary"
+                disabled={saving || deleting}
+              >
+                {saving ? 'Saving...' : 'Save changes'}
+              </button>
+            </div>
           </div>
+
           {onDelete ? (
             <button
               type="button"

@@ -5,6 +5,7 @@ import { buildClients } from './clientUtils'
 import { DEFAULT_JOB_TYPES, getJobTypeOptions, getJobTypePalette } from './jobTypes'
 import useJobTypes from './useJobTypes'
 import { parseDateValue } from './dateUtils'
+import { EmptyState, JobStatusChips, MetricCard, SectionCard } from './productUi'
 
 const CALENDAR_VIEWS = [
   { key: 'day', label: 'Daily' },
@@ -349,6 +350,7 @@ function CalendarJobCard({ job, jobTypes, onClick, onEdit, compact = false, clas
       >
         <span className="calendar-job-pill-title">{job.name}</span>
         <span className="calendar-job-pill-type">{formatTimeRange(job.start_time)}</span>
+        <JobStatusChips job={job} className="calendar-job-pill-statuses" />
         {showMeta && (
           <span className="calendar-job-pill-meta">
             {job.address || 'No address'} | {formatCurrency(job.payment)}
@@ -444,10 +446,12 @@ export default function CalendarPage({ currentUser }) {
 
     return map
   }, [jobs])
-  const clients = useMemo(() => buildClients(jobs), [jobs])
-
   const today = startOfDay(new Date())
   const todayKey = getDateKey(today)
+  const clients = useMemo(() => buildClients(jobs), [jobs])
+  const scheduledTodayCount = (jobsByDate.get(todayKey) || []).length
+  const unscheduledCount = jobs.filter((job) => !job.start_time).length
+  const totalRevenue = jobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0)
 
   const stepCalendar = (direction) => {
     setAnchorDate((current) => {
@@ -627,9 +631,11 @@ export default function CalendarPage({ currentUser }) {
           </div>
 
           {dayJobs.length === 0 ? (
-            <div className="calendar-empty-panel">
-              <p>No jobs are scheduled for this day.</p>
-            </div>
+            <EmptyState
+              title="No jobs scheduled for this day"
+              description="This is a clean opening in the schedule. Add a job or move here from another day."
+              className="calendar-empty-panel calendar-empty-panel--replace"
+            />
           ) : (
             <>
               {scheduledJobs.length > 0 ? (
@@ -656,7 +662,7 @@ export default function CalendarPage({ currentUser }) {
 
                       <div className="calendar-time-grid-overlay" style={{ height: `${timelineHeight}px` }}>
                         {scheduledJobs.map(({ job, startMinutes, endMinutes, columnIndex, columnCount }) => {
-                          const topOffset = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT-DEFAULT_JOB_DURATION_MINUTES / 60 * DAY_TIMELINE_ROW_HEIGHT
+                          const topOffset = ((startMinutes - timelineStartMinutes) / 60) * DAY_TIMELINE_ROW_HEIGHT
                           const durationMinutes = Math.max(endMinutes - startMinutes, DEFAULT_JOB_DURATION_MINUTES)
                           const eventHeight = Math.max(
                             (durationMinutes / 60) * DAY_TIMELINE_ROW_HEIGHT,
@@ -690,9 +696,11 @@ export default function CalendarPage({ currentUser }) {
                   </div>
                 </div>
               ) : (
-                <div className="calendar-empty-panel calendar-empty-panel--compact">
-                  <p>No jobs on this day have a start time yet.</p>
-                </div>
+                <EmptyState
+                  title="No timed jobs yet"
+                  description="Appointments on this day still need a start time before the route feels operational."
+                  className="calendar-empty-panel calendar-empty-panel--compact calendar-empty-panel--replace"
+                />
               )}
 
               {unscheduledJobs.length > 0 && (
@@ -888,51 +896,57 @@ export default function CalendarPage({ currentUser }) {
   if (jobs.length === 0) {
     return (
       <div className="calendar-page">
-        <div className="jobs-empty-state">
-          <div>
-            <h3>No jobs scheduled</h3>
-            <p>Create your first appointment to populate the calendar.</p>
-          </div>
-        </div>
+        <EmptyState
+          title="No jobs scheduled"
+          description="Create your first appointment to turn the calendar into a real scheduling tool."
+        />
       </div>
     )
   }
 
   return (
     <div className="calendar-page">
-      <div className="calendar-toolbar">
-        <div>
-          <h3>Job calendar</h3>
-          <p>Switch between daily, weekly, monthly, and yearly views. The calendar opens on the daily schedule by default.</p>
+      <SectionCard
+        eyebrow="Scheduling Board"
+        title="Operational calendar"
+        description="Switch views quickly, spot schedule gaps, and keep the day plan believable for the office and field."
+        className="calendar-shell-card"
+      >
+        <div className="metric-card-grid">
+          <MetricCard label="Today" value={scheduledTodayCount} helper="Jobs on the board now" tone="accent" />
+          <MetricCard label="Without time" value={unscheduledCount} helper="Need scheduling attention" />
+          <MetricCard label="Tracked revenue" value={formatCurrency(totalRevenue)} helper="Payment values across jobs" tone="success" />
         </div>
 
-        <div className="calendar-toolbar-actions">
-          <div className="calendar-view-toggle" role="tablist" aria-label="Calendar views">
-            {CALENDAR_VIEWS.map((view) => (
-              <button
-                key={view.key}
-                type="button"
-                className={`calendar-view-button${calendarView === view.key ? ' calendar-view-button--active' : ''}`}
-                onClick={() => setCalendarView(view.key)}
-              >
-                {view.label}
+        <div className="calendar-toolbar">
+          <div className="calendar-toolbar-actions calendar-toolbar-actions--wide">
+            <div className="calendar-view-toggle" role="tablist" aria-label="Calendar views">
+              {CALENDAR_VIEWS.map((view) => (
+                <button
+                  key={view.key}
+                  type="button"
+                  className={`calendar-view-button${calendarView === view.key ? ' calendar-view-button--active' : ''}`}
+                  onClick={() => setCalendarView(view.key)}
+                >
+                  {view.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="calendar-controls">
+              <button type="button" className="calendar-control-button" onClick={() => stepCalendar(-1)}>
+                Previous
               </button>
-            ))}
-          </div>
-
-          <div className="calendar-controls">
-            <button type="button" className="calendar-control-button" onClick={() => stepCalendar(-1)}>
-              Previous
-            </button>
-            <button type="button" className="calendar-control-button calendar-control-button--today" onClick={jumpToToday}>
-              Today
-            </button>
-            <button type="button" className="calendar-control-button" onClick={() => stepCalendar(1)}>
-              Next
-            </button>
+              <button type="button" className="calendar-control-button calendar-control-button--today" onClick={jumpToToday}>
+                Today
+              </button>
+              <button type="button" className="calendar-control-button" onClick={() => stepCalendar(1)}>
+                Next
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </SectionCard>
 
       <div className="calendar-range-banner">
         <div>
@@ -962,10 +976,12 @@ export default function CalendarPage({ currentUser }) {
         <div className="comments-modal-backdrop" onClick={closeJobDetails}>
           <div className="comments-modal calendar-details-modal" onClick={(event) => event.stopPropagation()}>
             <div className="comments-modal-header">
+              <p className="section-card__eyebrow">Job Details</p>
               <h3>{selectedJob.name}</h3>
               <p className="comments-modal-subtitle">
                 {formatFullDate(selectedJob.job_date)} - {formatTimeRange(selectedJob.start_time)}
               </p>
+              <JobStatusChips job={selectedJob} />
             </div>
 
             <div className="calendar-details-grid">
