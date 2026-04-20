@@ -55,6 +55,36 @@ Appointment Assistant is a two-tier toolkit for capturing service jobs, tracking
    ```
    The frontend expects the backend at `http://localhost:5000`. If Vite starts on `5174` instead of `5173`, include that origin in `CORS_ORIGINS`.
 
+## Railway + Netlify wiring
+
+For production, treat Railway as the only Stripe backend and Netlify as the only web origin.
+
+Set these env vars in **Railway** for `Backend/`:
+
+- `APP_BASE_URL=your frontend url`
+- `CORS_ORIGINS=your frontend url`
+- `COOKIE_SAME_SITE=None`
+- `COOKIE_SECURE=true`
+- `STRIPE_SECRET_KEY=...`
+- `STRIPE_WEBHOOK_SECRET=...`
+- `STRIPE_PRICE_ID_STARTER=...`
+- `STRIPE_PRICE_ID_TEAM=...`
+- `STRIPE_PRICE_ID_PRO=...`
+
+`APP_BASE_URL` now acts as the default source for Stripe success/cancel/portal return URLs, so you only need to set `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, and `STRIPE_PORTAL_RETURN_URL` if you want to override the default `/billing` route on the Netlify app.
+
+Set these env vars in **Netlify** for `Frontend/`:
+
+- `VITE_API_BASE=https://appointmentassistant-production.up.railway.app`
+
+Set this env var in **Expo/mobile** builds when you want the app to hit Railway instead of a local LAN server:
+
+- `EXPO_PUBLIC_API_BASE=https://appointmentassistant-production.up.railway.app`
+
+Point the Stripe webhook endpoint at the Railway backend:
+
+- `https://appointmentassistant-production.up.railway.app/billing/webhook`
+
 ## Workflow checklist
 1. Create an account or sign in on `/`.
 2. Capture a job on `/jobs/new`, including optional payment and comments.

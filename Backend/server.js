@@ -135,6 +135,8 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || (IS_PRODUCTION ? "None" : "Lax");
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || `${IS_PRODUCTION}`) === "true";
+const normalizeOrigin = (origin = "") => String(origin).trim().replace(/\/+$/, "");
+const APP_BASE_URL = normalizeOrigin(process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || "");
 
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
@@ -142,9 +144,9 @@ const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5174",
   "http://127.0.0.1:5174",
   "http://localhost:3000",
+  APP_BASE_URL,
   "https://appointmentassistant.netlify.app"
-];
-const normalizeOrigin = (origin) => origin.trim().replace(/\/+$/, "");
+].filter(Boolean);
 const allowedOrigins = (
   (process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.split(",")) || DEFAULT_CORS_ORIGINS
 )
@@ -178,7 +180,7 @@ const validateRuntimeConfig = () => {
   }
   if (STRIPE_HAS_ANY_CONFIG && !isStripeReady()) {
     missing.push(
-      "Complete STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_TEAM, STRIPE_PRICE_ID_PRO, STRIPE_SUCCESS_URL, and STRIPE_CANCEL_URL"
+      "Complete STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_TEAM, STRIPE_PRICE_ID_PRO, and either APP_BASE_URL or STRIPE_SUCCESS_URL plus STRIPE_CANCEL_URL"
     );
   }
 

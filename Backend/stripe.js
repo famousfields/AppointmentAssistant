@@ -1,6 +1,15 @@
 const crypto = require("crypto");
 
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
+const normalizeUrl = (value = "") => String(value).trim().replace(/\/+$/, "");
+
+const getAppBaseUrl = () =>
+  normalizeUrl(process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || "");
+
+const getDefaultBillingReturnUrl = () => {
+  const appBaseUrl = getAppBaseUrl();
+  return appBaseUrl ? `${appBaseUrl}/billing` : "";
+};
 
 const getPlanPriceIdMap = () => ({
   starter: process.env.STRIPE_PRICE_ID_STARTER || "",
@@ -11,12 +20,16 @@ const getPlanPriceIdMap = () => ({
 const getStripeConfig = () => {
   const secretKey = process.env.STRIPE_SECRET_KEY || "";
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
-  const successUrl = process.env.STRIPE_SUCCESS_URL || "";
-  const cancelUrl = process.env.STRIPE_CANCEL_URL || "";
-  const portalReturnUrl = process.env.STRIPE_PORTAL_RETURN_URL || successUrl || cancelUrl || "";
+  const defaultBillingReturnUrl = getDefaultBillingReturnUrl();
+  const successUrl = normalizeUrl(process.env.STRIPE_SUCCESS_URL || defaultBillingReturnUrl);
+  const cancelUrl = normalizeUrl(process.env.STRIPE_CANCEL_URL || defaultBillingReturnUrl);
+  const portalReturnUrl = normalizeUrl(
+    process.env.STRIPE_PORTAL_RETURN_URL || successUrl || cancelUrl || defaultBillingReturnUrl
+  );
   const priceIds = getPlanPriceIdMap();
 
   return {
+    appBaseUrl: getAppBaseUrl(),
     secretKey,
     webhookSecret,
     successUrl,

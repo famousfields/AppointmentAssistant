@@ -1,6 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 
-export const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'https://appointmentassistant-production.up.railway.app'
+const normalizeApiBase = (value) => String(value || '').trim().replace(/\/+$/, '')
+
+export const API_BASE = normalizeApiBase(
+  process.env.EXPO_PUBLIC_API_BASE || 'https://appointmentassistant-production.up.railway.app'
+)
 
 const SESSION_KEY = 'appointment-assistant-mobile:session'
 const JOB_DRAFT_KEY = 'appointment-assistant-mobile:job-draft'

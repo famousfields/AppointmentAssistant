@@ -13,6 +13,12 @@ npm run start
 
 Use your machine's LAN IP instead of `localhost` when testing on a physical device.
 
+For builds that should talk to Railway instead of a local backend, set:
+
+```bash
+EXPO_PUBLIC_API_BASE=https://appointmentassistant-production.up.railway.app
+```
+
 ## What it includes
 
 - Login and account creation
