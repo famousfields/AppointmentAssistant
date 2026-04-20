@@ -337,38 +337,34 @@ const buildDayTimeline = (dayJobs) => {
   }
 }
 
-function CalendarJobCard({ job, jobTypes, onClick, onEdit, compact = false, className = '', style, showMeta = !compact }) {
+function CalendarJobCard({ job, jobTypes, onClick, onEdit, compact = false, className = '', style }) {
   return (
     <div
       className={`calendar-job-pill${compact ? ' calendar-job-pill--compact' : ''}${onEdit ? ' calendar-job-pill--editable' : ''}${className ? ` ${className}` : ''}`}
       style={{ ...getCalendarJobStyle(job.job_type_color || job.job_type, jobTypes), ...style }}
     >
+      {onEdit ? (
+        <div className="calendar-job-pill-toolbar">
+          <button
+            type="button"
+            className="calendar-job-pill-edit"
+            onClick={(event) => {
+              event.stopPropagation()
+              onEdit(job)
+            }}
+          >
+            Edit
+          </button>
+        </div>
+      ) : null}
       <button
         type="button"
         className="calendar-job-pill-main"
         onClick={() => onClick(job)}
       >
-        <span className="calendar-job-pill-title">{job.name}</span>
-        <span className="calendar-job-pill-type">{formatTimeRange(job.start_time)}</span>
+        <span className="calendar-job-pill-type">{job.job_type || 'Job type not set'}</span>
         <JobStatusChips job={job} className="calendar-job-pill-statuses" />
-        {showMeta && (
-          <span className="calendar-job-pill-meta">
-            {job.address || 'No address'} | {formatCurrency(job.payment)}
-          </span>
-        )}
       </button>
-      {onEdit ? (
-        <button
-          type="button"
-          className="calendar-job-pill-edit"
-          onClick={(event) => {
-            event.stopPropagation()
-            onEdit(job)
-          }}
-        >
-          Edit
-        </button>
-      ) : null}
     </div>
   )
 }

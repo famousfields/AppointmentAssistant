@@ -947,8 +947,18 @@
   min-height: 40px;
 }
 
+.calendar-job-pill--timeline .calendar-job-pill-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 0;
+  z-index: 2;
+}
+
 .calendar-job-pill--timeline .calendar-job-pill-main {
-  padding: 14px 12px 12px;
+  min-height: 100%;
+  justify-content: center;
+  padding: 12px 64px 12px 14px;
 }
 
 .calendar-job-pill--timeline .calendar-job-pill-title,
@@ -966,6 +976,16 @@
 .calendar-job-pill--timeline .calendar-job-pill-type,
 .calendar-job-pill--timeline .calendar-job-pill-meta {
   font-size: 0.8rem;
+}
+
+.calendar-job-pill--timeline .calendar-job-pill-statuses {
+  margin-top: 4px;
+}
+
+.calendar-job-pill--timeline .calendar-job-pill-statuses .status-chip {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 0.68rem;
 }
 
 .calendar-day-secondary-list {
@@ -1070,6 +1090,7 @@
 .calendar-job-pill {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: stretch;
   border: 1px solid var(--job-border, var(--border));
   border-radius: 16px;
@@ -1082,6 +1103,12 @@
 .calendar-job-pill:hover {
   transform: translateY(-1px);
   filter: brightness(1.04);
+}
+
+.calendar-job-pill-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 8px 0;
 }
 
 .calendar-job-pill--compact {
@@ -1135,14 +1162,8 @@
   line-height: 1.4;
 }
 
-.calendar-job-pill--editable .calendar-job-pill-main {
-  padding-right: 72px;
-}
-
 .calendar-job-pill-edit {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+  position: static;
   min-height: 26px;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.24);
@@ -1152,7 +1173,6 @@
   font-size: 0.72rem;
   font-weight: 800;
   cursor: pointer;
-  z-index: 2;
 }
 
 .calendar-week-board {
