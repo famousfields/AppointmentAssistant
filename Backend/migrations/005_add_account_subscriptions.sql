@@ -44,7 +44,10 @@ ALTER TABLE Clients
   DROP INDEX unique_client;
 
 ALTER TABLE Clients
-  ADD UNIQUE KEY unique_client_per_user (user_id, name, phone, address);
+  DROP INDEX idx_clients_identity;
+
+ALTER TABLE Clients
+  ADD COLUMN user_id INT NULL;
 
 UPDATE Clients c
 JOIN (
@@ -56,3 +59,13 @@ JOIN (
 SET c.user_id = ownership.user_id
 WHERE c.user_id IS NULL
   AND ownership.user_count = 1;
+
+ALTER TABLE Clients
+  ADD KEY idx_clients_user_id (user_id);
+
+ALTER TABLE Clients
+  ADD CONSTRAINT clients_ibfk_1
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE Clients
+  ADD UNIQUE KEY unique_client_per_user (user_id, name, phone, address);
