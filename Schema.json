@@ -25,5 +25,18 @@
     "normalized_name": "string",
     "color": "string",
     "sort_order": "number"
+  },
+  "account_subscriptions": {
+    "id": "string",
+    "user_id": "string",
+    "plan_code": "string",
+    "subscription_status": "string",
+    "trial_ends_at": "string",
+    "current_period_starts_at": "string",
+    "current_period_ends_at": "string",
+    "monthly_client_creations": "number",
+    "monthly_job_creations": "number",
+    "stripe_customer_id": "string",
+    "stripe_subscription_id": "string"
   }
 }

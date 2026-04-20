@@ -4,6 +4,16 @@ const bcrypt = require("bcrypt");
 const db = require("./db");
 const runMigrations = require("./runMigrations");
 const {
+  createCheckoutSession,
+  createPortalSession,
+  ensureStripeCustomer,
+  getStripeConfig,
+  isStripeReady,
+  resolveStripePriceId,
+  stripeRequest,
+  verifyStripeWebhookSignature
+} = require("./stripe");
+const {
   clearRefreshTokenCookie,
   createAccessToken,
   createRefreshToken,
@@ -23,6 +33,100 @@ const DEFAULT_JOB_TYPES = [
   { name: "Riding Mower", color: "#3b82f6", sortOrder: 2 },
   { name: "Pressure Washer", color: "#06b6d4", sortOrder: 3 }
 ];
+const SUBSCRIPTION_PLAN_CATALOG = [
+  {
+    code: "free",
+    name: "Free",
+    priceMonthly: 0,
+    priceLabel: "$0",
+    userLimit: 1,
+    monthlyClientLimit: 10,
+    monthlyJobLimit: 25,
+    description: "Try the full scheduling flow with monthly creation limits.",
+    features: [
+      "1 user",
+      "10 new clients per month",
+      "25 new jobs per month",
+      "Calendar, clients, notes, and payment tracking"
+    ]
+  },
+  {
+    code: "starter",
+    name: "Starter",
+    priceMonthly: 14.99,
+    priceLabel: "$14.99/mo",
+    userLimit: 1,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: "Unlimited records for solo operators.",
+    features: [
+      "1 user",
+      "Unlimited clients and jobs",
+      "Custom job types and calendar colors",
+      "Core scheduling workflow"
+    ]
+  },
+  {
+    code: "team",
+    name: "Team",
+    priceMonthly: 39.99,
+    priceLabel: "$39.99/mo",
+    userLimit: 5,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: "Shared scheduling for small crews.",
+    features: [
+      "Up to 5 users",
+      "Unlimited clients and jobs",
+      "Shared scheduling foundations",
+      "Built for growing teams"
+    ]
+  },
+  {
+    code: "pro",
+    name: "Pro",
+    priceMonthly: 79.99,
+    priceLabel: "$79.99/mo",
+    userLimit: 15,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: "Advanced tools for scaling service businesses.",
+    features: [
+      "Up to 15 users",
+      "Unlimited clients and jobs",
+      "Best fit for automation and advanced workflows",
+      "Mobile and desktop access"
+    ]
+  },
+  {
+    code: "enterprise",
+    name: "Enterprise",
+    priceMonthly: 249,
+    priceLabel: "From $249/mo",
+    userLimit: null,
+    monthlyClientLimit: null,
+    monthlyJobLimit: null,
+    description: "Custom onboarding, integrations, and support.",
+    features: [
+      "Custom user limits",
+      "Priority onboarding",
+      "Custom integrations",
+      "Contact sales"
+    ],
+    canSelfServe: false
+  }
+];
+const SUBSCRIPTION_PLAN_MAP = new Map(
+  SUBSCRIPTION_PLAN_CATALOG.map((plan, index) => [plan.code, { ...plan, level: index }])
+);
+const SELF_SERVE_PLAN_CODES = SUBSCRIPTION_PLAN_CATALOG
+  .filter((plan) => plan.canSelfServe !== false)
+  .map((plan) => plan.code);
+const STRIPE_CONFIG = getStripeConfig();
+const STRIPE_HAS_ANY_CONFIG =
+  Boolean(STRIPE_CONFIG.secretKey || STRIPE_CONFIG.webhookSecret || STRIPE_CONFIG.successUrl || STRIPE_CONFIG.cancelUrl) ||
+  Object.values(STRIPE_CONFIG.priceIds).some(Boolean);
+const BILLING_CHECKOUT_MODE = isStripeReady() ? "stripe" : "manual_preview";
 
 const ACCESS_TOKEN_TTL_MS = Number.parseInt(process.env.ACCESS_TOKEN_TTL_MS || `${15 * 60 * 1000}`, 10);
 const REFRESH_TOKEN_TTL_DAYS = Number.parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || "14", 10);
@@ -31,6 +135,8 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || (IS_PRODUCTION ? "None" : "Lax");
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || `${IS_PRODUCTION}`) === "true";
+const normalizeOrigin = (origin = "") => String(origin).trim().replace(/\/+$/, "");
+const APP_BASE_URL = normalizeOrigin(process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || "");
 
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
@@ -38,9 +144,9 @@ const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5174",
   "http://127.0.0.1:5174",
   "http://localhost:3000",
+  APP_BASE_URL,
   "https://appointmentassistant.netlify.app"
-];
-const normalizeOrigin = (origin) => origin.trim().replace(/\/+$/, "");
+].filter(Boolean);
 const allowedOrigins = (
   (process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.split(",")) || DEFAULT_CORS_ORIGINS
 )
@@ -71,6 +177,11 @@ const validateRuntimeConfig = () => {
   if (!REFRESH_TOKEN_SECRET) missing.push("REFRESH_TOKEN_SECRET");
   if (COOKIE_SAME_SITE.toLowerCase() === "none" && !COOKIE_SECURE) {
     missing.push("COOKIE_SECURE=true (required when COOKIE_SAME_SITE=None)");
+  }
+  if (STRIPE_HAS_ANY_CONFIG && !isStripeReady()) {
+    missing.push(
+      "Complete STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_TEAM, STRIPE_PRICE_ID_PRO, and either APP_BASE_URL or STRIPE_SUCCESS_URL plus STRIPE_CANCEL_URL"
+    );
   }
 
   if (missing.length > 0) {
@@ -170,6 +281,103 @@ const buildColorFromName = (value) => {
     .join("")}`;
 };
 
+const startOfDay = (value = new Date()) =>
+  new Date(value.getFullYear(), value.getMonth(), value.getDate());
+
+const parseStoredDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return startOfDay(value);
+
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+};
+
+const formatDateOnly = (value) => {
+  const date = startOfDay(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const addMonthsKeepingDay = (value, amount) => {
+  const source = startOfDay(value);
+  const targetMonth = source.getMonth() + amount;
+  const firstOfTargetMonth = new Date(source.getFullYear(), targetMonth, 1);
+  const lastDayOfTargetMonth = new Date(
+    firstOfTargetMonth.getFullYear(),
+    firstOfTargetMonth.getMonth() + 1,
+    0
+  ).getDate();
+
+  return new Date(
+    firstOfTargetMonth.getFullYear(),
+    firstOfTargetMonth.getMonth(),
+    Math.min(source.getDate(), lastDayOfTargetMonth)
+  );
+};
+
+const getPlanDefinition = (planCode) => SUBSCRIPTION_PLAN_MAP.get(planCode) || SUBSCRIPTION_PLAN_MAP.get("free");
+
+const serializePlanDefinition = (plan) => ({
+  code: plan.code,
+  name: plan.name,
+  priceMonthly: plan.priceMonthly,
+  priceLabel: plan.priceLabel,
+  userLimit: plan.userLimit,
+  monthlyClientLimit: plan.monthlyClientLimit,
+  monthlyJobLimit: plan.monthlyJobLimit,
+  description: plan.description,
+  features: plan.features,
+  canSelfServe: plan.canSelfServe !== false
+});
+
+const buildSubscriptionSummary = (row) => {
+  const plan = getPlanDefinition(row?.plan_code);
+  const monthlyClientLimit = plan.monthlyClientLimit;
+  const monthlyJobLimit = plan.monthlyJobLimit;
+  const monthlyClientCreations = Number(row?.monthly_client_creations || 0);
+  const monthlyJobCreations = Number(row?.monthly_job_creations || 0);
+  const monthlyClientRemaining =
+    monthlyClientLimit === null ? null : Math.max(monthlyClientLimit - monthlyClientCreations, 0);
+  const monthlyJobRemaining =
+    monthlyJobLimit === null ? null : Math.max(monthlyJobLimit - monthlyJobCreations, 0);
+  const creationBlocked =
+    (monthlyClientRemaining !== null && monthlyClientRemaining <= 0) ||
+    (monthlyJobRemaining !== null && monthlyJobRemaining <= 0);
+
+  return {
+    planCode: plan.code,
+    planName: plan.name,
+    priceMonthly: plan.priceMonthly,
+    priceLabel: plan.priceLabel,
+    subscriptionStatus: row?.subscription_status || "active",
+    trialEndsAt: row?.trial_ends_at ? formatDateOnly(parseStoredDateValue(row.trial_ends_at)) : null,
+    currentPeriodStartsAt: formatDateOnly(parseStoredDateValue(row?.current_period_starts_at) || startOfDay()),
+    currentPeriodEndsAt: formatDateOnly(
+      parseStoredDateValue(row?.current_period_ends_at) || addMonthsKeepingDay(startOfDay(), 1)
+    ),
+    usage: {
+      monthlyClientCreations,
+      monthlyJobCreations,
+      monthlyClientLimit,
+      monthlyJobLimit,
+      monthlyClientRemaining,
+      monthlyJobRemaining
+    },
+    entitlements: {
+      canManageJobTypes: plan.level >= getPlanDefinition("starter").level,
+      hasUnlimitedRecords: monthlyClientLimit === null && monthlyJobLimit === null,
+      creationBlocked
+    },
+    checkoutMode: BILLING_CHECKOUT_MODE,
+    plans: SUBSCRIPTION_PLAN_CATALOG.map(serializePlanDefinition)
+  };
+};
+
 const seedDefaultJobTypesForUser = async (userId) => {
   const values = DEFAULT_JOB_TYPES.map((type) => [
     userId,
@@ -186,6 +394,292 @@ const seedDefaultJobTypesForUser = async (userId) => {
     `,
     [values]
   );
+};
+
+const seedDefaultSubscriptionForUser = async (userId) => {
+  const currentPeriodStart = startOfDay();
+  const currentPeriodEnd = addMonthsKeepingDay(currentPeriodStart, 1);
+
+  await db.promise().query(
+    `
+      INSERT IGNORE INTO account_subscriptions (
+        user_id,
+        plan_code,
+        subscription_status,
+        current_period_starts_at,
+        current_period_ends_at,
+        monthly_client_creations,
+        monthly_job_creations
+      )
+      VALUES (?, 'free', 'active', ?, ?, 0, 0)
+    `,
+    [userId, formatDateOnly(currentPeriodStart), formatDateOnly(currentPeriodEnd)]
+  );
+};
+
+const syncSubscriptionPeriodForUser = async (subscriptionRow) => {
+  if (!subscriptionRow) return null;
+
+  let currentPeriodStart = parseStoredDateValue(subscriptionRow.current_period_starts_at) || startOfDay();
+  let currentPeriodEnd =
+    parseStoredDateValue(subscriptionRow.current_period_ends_at) || addMonthsKeepingDay(currentPeriodStart, 1);
+  const today = startOfDay();
+
+  if (currentPeriodEnd <= currentPeriodStart) {
+    currentPeriodEnd = addMonthsKeepingDay(currentPeriodStart, 1);
+  }
+
+  if (today < currentPeriodEnd) {
+    return {
+      ...subscriptionRow,
+      current_period_starts_at: formatDateOnly(currentPeriodStart),
+      current_period_ends_at: formatDateOnly(currentPeriodEnd)
+    };
+  }
+
+  while (today >= currentPeriodEnd) {
+    currentPeriodStart = currentPeriodEnd;
+    currentPeriodEnd = addMonthsKeepingDay(currentPeriodStart, 1);
+  }
+
+  await db.promise().query(
+    `
+      UPDATE account_subscriptions
+      SET current_period_starts_at = ?,
+          current_period_ends_at = ?,
+          monthly_client_creations = 0,
+          monthly_job_creations = 0
+      WHERE user_id = ?
+    `,
+    [formatDateOnly(currentPeriodStart), formatDateOnly(currentPeriodEnd), subscriptionRow.user_id]
+  );
+
+  return {
+    ...subscriptionRow,
+    current_period_starts_at: formatDateOnly(currentPeriodStart),
+    current_period_ends_at: formatDateOnly(currentPeriodEnd),
+    monthly_client_creations: 0,
+    monthly_job_creations: 0
+  };
+};
+
+const getSubscriptionContextForUser = async (userId) => {
+  await seedDefaultSubscriptionForUser(userId);
+
+  const [[subscriptionRow]] = await db.promise().query(
+    `
+      SELECT id, user_id, plan_code, subscription_status, trial_ends_at,
+             current_period_starts_at, current_period_ends_at,
+             monthly_client_creations, monthly_job_creations,
+             stripe_customer_id, stripe_subscription_id
+      FROM account_subscriptions
+      WHERE user_id = ?
+      LIMIT 1
+    `,
+    [userId]
+  );
+
+  const syncedRow = await syncSubscriptionPeriodForUser(subscriptionRow);
+  return {
+    row: syncedRow,
+    plan: getPlanDefinition(syncedRow?.plan_code),
+    summary: buildSubscriptionSummary(syncedRow)
+  };
+};
+
+const buildPlanLimitMessage = (summary, { createsClient = false, createsJob = false } = {}) => {
+  const messages = [];
+
+  if (
+    createsClient &&
+    summary.usage.monthlyClientLimit !== null &&
+    summary.usage.monthlyClientRemaining !== null &&
+    summary.usage.monthlyClientRemaining <= 0
+  ) {
+    messages.push(
+      `your Free plan includes up to ${summary.usage.monthlyClientLimit} new clients per month`
+    );
+  }
+
+  if (
+    createsJob &&
+    summary.usage.monthlyJobLimit !== null &&
+    summary.usage.monthlyJobRemaining !== null &&
+    summary.usage.monthlyJobRemaining <= 0
+  ) {
+    messages.push(
+      `your Free plan includes up to ${summary.usage.monthlyJobLimit} new jobs per month`
+    );
+  }
+
+  if (messages.length === 0) {
+    messages.push("your current plan has reached its creation limit");
+  }
+
+  return `You have reached the point where ${messages.join(" and ")}. Your allowance resets on ${
+    summary.currentPeriodEndsAt
+  }, or you can upgrade to Starter for unlimited records.`;
+};
+
+const assertCanCreateWithSubscription = (subscriptionContext, { createsClient = false, createsJob = false } = {}) => {
+  const { summary } = subscriptionContext;
+
+  const clientBlocked =
+    createsClient &&
+    summary.usage.monthlyClientLimit !== null &&
+    summary.usage.monthlyClientCreations + 1 > summary.usage.monthlyClientLimit;
+  const jobBlocked =
+    createsJob &&
+    summary.usage.monthlyJobLimit !== null &&
+    summary.usage.monthlyJobCreations + 1 > summary.usage.monthlyJobLimit;
+
+  if (!clientBlocked && !jobBlocked) {
+    return;
+  }
+
+  const error = new Error(
+    buildPlanLimitMessage(summary, {
+      createsClient: clientBlocked,
+      createsJob: jobBlocked
+    })
+  );
+  error.statusCode = 403;
+  error.code = "PLAN_LIMIT_REACHED";
+  error.subscription = summary;
+  throw error;
+};
+
+const incrementSubscriptionUsage = async (userId, { clientsDelta = 0, jobsDelta = 0 } = {}) => {
+  if (!clientsDelta && !jobsDelta) return;
+
+  await db.promise().query(
+    `
+      UPDATE account_subscriptions
+      SET monthly_client_creations = monthly_client_creations + ?,
+          monthly_job_creations = monthly_job_creations + ?
+      WHERE user_id = ?
+    `,
+    [clientsDelta, jobsDelta, userId]
+  );
+};
+
+const ensurePlanAllowsJobTypeManagement = async (userId) => {
+  const subscriptionContext = await getSubscriptionContextForUser(userId);
+  if (subscriptionContext.summary.entitlements.canManageJobTypes) {
+    return subscriptionContext;
+  }
+
+  const error = new Error(
+    "Custom job types and color management are available on Starter and above. Upgrade to unlock business-specific job types."
+  );
+  error.statusCode = 403;
+  error.code = "FEATURE_NOT_AVAILABLE";
+  error.subscription = subscriptionContext.summary;
+  throw error;
+};
+
+const formatUnixDateOnly = (value) => {
+  if (!value) return formatDateOnly(startOfDay());
+  return formatDateOnly(new Date(Number(value) * 1000));
+};
+
+const getPlanCodeFromStripePriceId = (priceId) => {
+  const entries = Object.entries(STRIPE_CONFIG.priceIds || {});
+  const match = entries.find(([, configuredPriceId]) => configuredPriceId && configuredPriceId === priceId);
+  return match ? match[0] : null;
+};
+
+const saveStripeCustomerId = async (userId, customerId) => {
+  if (!userId || !customerId) return;
+
+  await db.promise().query(
+    `
+      UPDATE account_subscriptions
+      SET stripe_customer_id = ?
+      WHERE user_id = ?
+    `,
+    [customerId, userId]
+  );
+};
+
+const ensureStripeCustomerForUser = async (subscriptionContext, user) => {
+  const existingCustomerId = subscriptionContext.row?.stripe_customer_id || null;
+  if (existingCustomerId) {
+    return existingCustomerId;
+  }
+
+  const customerId = await ensureStripeCustomer({
+    user,
+    existingCustomerId
+  });
+  await saveStripeCustomerId(user.id, customerId);
+  return customerId;
+};
+
+const saveStripeSubscriptionState = async ({
+  userId,
+  planCode,
+  subscriptionStatus,
+  stripeCustomerId,
+  stripeSubscriptionId,
+  currentPeriodStartsAt,
+  currentPeriodEndsAt,
+  trialEndsAt = null
+}) => {
+  await db.promise().query(
+    `
+      UPDATE account_subscriptions
+      SET plan_code = ?,
+          subscription_status = ?,
+          trial_ends_at = ?,
+          current_period_starts_at = ?,
+          current_period_ends_at = ?,
+          monthly_client_creations = 0,
+          monthly_job_creations = 0,
+          stripe_customer_id = COALESCE(?, stripe_customer_id),
+          stripe_subscription_id = COALESCE(?, stripe_subscription_id)
+      WHERE user_id = ?
+    `,
+    [
+      planCode,
+      subscriptionStatus,
+      trialEndsAt,
+      currentPeriodStartsAt,
+      currentPeriodEndsAt,
+      stripeCustomerId || null,
+      stripeSubscriptionId || null,
+      userId
+    ]
+  );
+};
+
+const syncAccountSubscriptionFromStripeSubscription = async (stripeSubscription) => {
+  if (!stripeSubscription) return null;
+
+  const metadata = stripeSubscription.metadata || {};
+  const userId = Number(metadata.user_id || 0);
+  const planCodeFromMetadata = String(metadata.plan_code || "").trim().toLowerCase();
+  const priceId = stripeSubscription.items?.data?.[0]?.price?.id || "";
+  const planCode =
+    planCodeFromMetadata || getPlanCodeFromStripePriceId(priceId) || "free";
+
+  if (!userId) {
+    return null;
+  }
+
+  await saveStripeSubscriptionState({
+    userId,
+    planCode,
+    subscriptionStatus: stripeSubscription.status || "active",
+    stripeCustomerId: stripeSubscription.customer || null,
+    stripeSubscriptionId: stripeSubscription.id || null,
+    currentPeriodStartsAt: formatUnixDateOnly(stripeSubscription.current_period_start),
+    currentPeriodEndsAt: formatUnixDateOnly(stripeSubscription.current_period_end),
+    trialEndsAt: stripeSubscription.trial_end ? formatUnixDateOnly(stripeSubscription.trial_end) : null
+  });
+
+  const refreshed = await getSubscriptionContextForUser(userId);
+  return refreshed.summary;
 };
 
 const fetchJobTypeById = async (userId, jobTypeId) => {
@@ -313,10 +807,18 @@ app.options("/auth/logout", cors(corsOptions));
 app.options("/jobs", cors(corsOptions));
 app.options("/jobs/:id", cors(corsOptions));
 app.options("/jobs/:id/comments", cors(corsOptions));
+app.options("/billing/summary", cors(corsOptions));
+app.options("/billing/subscription", cors(corsOptions));
+app.options("/billing/checkout-session", cors(corsOptions));
+app.options("/billing/portal-session", cors(corsOptions));
 app.options("/job-types", cors(corsOptions));
 app.options("/job-types/:id", cors(corsOptions));
 app.options("/clients/:id", cors(corsOptions));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buffer) => {
+    req.rawBody = Buffer.from(buffer);
+  }
+}));
 app.use(
   createRateLimiter({
     windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
@@ -380,6 +882,7 @@ app.post(
       const [insertResult] = await db.promise().query(insertQuery, [username, email, hashedPassword]);
       if (insertResult?.insertId) {
         await seedDefaultJobTypesForUser(insertResult.insertId);
+        await seedDefaultSubscriptionForUser(insertResult.insertId);
       }
       return res.status(201).json({ message: "Account created successfully" });
     } catch (err) {
@@ -535,72 +1038,93 @@ app.post(
     const normalizedStartTime = `${startTime}:00`;
     const userId = req.user.id;
     let jobType;
+    let transactionStarted = false;
 
     try {
+      const subscriptionContext = await getSubscriptionContextForUser(userId);
       jobType = await ensureJobTypeForJob(userId, req.body);
-    } catch (error) {
-      return res.status(error.statusCode || 400).json({ error: error.message || "Invalid job type" });
-    }
+      const [clientRows] = await db.promise().query(
+        `
+          SELECT DISTINCT c.id
+          FROM Clients c
+          LEFT JOIN Jobs existing_jobs
+            ON existing_jobs.client_id = c.id AND existing_jobs.user_id = ?
+          WHERE c.name = ? AND c.phone = ? AND c.address = ?
+            AND (c.user_id = ? OR existing_jobs.id IS NOT NULL)
+          LIMIT 1
+        `,
+        [userId, name, phone, address, userId]
+      );
 
-    const getClientQuery = `
-      SELECT id FROM Clients
-      WHERE name = ? AND phone = ? AND address = ?
-      LIMIT 1
-    `;
+      const existingClient = clientRows[0] || null;
+      const createsClient = !existingClient;
+      assertCanCreateWithSubscription(subscriptionContext, {
+        createsClient,
+        createsJob: true
+      });
 
-    db.query(getClientQuery, [name, phone, address], (err, clientResult) => {
-      if (err) {
-        console.error("Error fetching client:", err);
-        return res.status(500).json({ error: "Database error" });
+      await db.promise().query("START TRANSACTION");
+      transactionStarted = true;
+
+      let clientId = existingClient?.id || null;
+      if (!clientId) {
+        const [insertedClient] = await db.promise().query(
+          `
+            INSERT INTO Clients (name, phone, address, notes, user_id)
+            VALUES (?, ?, ?, NULL, ?)
+          `,
+          [name, phone, address, userId]
+        );
+        clientId = insertedClient.insertId;
       }
 
-      if (clientResult.length > 0) {
-        const clientId = clientResult[0].id;
-        insertJob(clientId);
-      } else {
-        const insertClientQuery = `
-          INSERT INTO Clients (name, phone, address, notes)
-          VALUES (?, ?, ?, NULL)
-        `;
-        db.query(insertClientQuery, [name, phone, address], (insertErr, result) => {
-          if (insertErr) {
-            console.error("Error inserting client:", insertErr);
-            return res.status(500).json({ error: "Database error" });
-          }
-          const clientId = result.insertId;
-          return insertJob(clientId);
+      const [insertedJob] = await db.promise().query(
+        `
+          INSERT INTO Jobs (client_id, job_type_id, job_type, job_date, start_time, comments, status, payment, user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          clientId,
+          jobType.id,
+          jobType.name,
+          jobDate,
+          normalizedStartTime,
+          comments?.trim() ? comments.trim() : null,
+          "Pending",
+          normalizedPayment,
+          userId
+        ]
+      );
+
+      await incrementSubscriptionUsage(userId, {
+        clientsDelta: createsClient ? 1 : 0,
+        jobsDelta: 1
+      });
+      await db.promise().query("COMMIT");
+
+      const refreshedSubscription = await getSubscriptionContextForUser(userId);
+      return res.json({
+        message: "Job saved successfully",
+        jobId: insertedJob.insertId,
+        subscription: refreshedSubscription.summary
+      });
+    } catch (error) {
+      if (transactionStarted) {
+        await db.promise().query("ROLLBACK");
+      }
+      if (error.code === "PLAN_LIMIT_REACHED" || error.code === "FEATURE_NOT_AVAILABLE") {
+        return res.status(error.statusCode || 403).json({
+          error: error.message,
+          code: error.code,
+          subscription: error.subscription || null
         });
       }
-
-      function insertJob(clientId) {
-        const jobQuery = `
-        INSERT INTO Jobs (client_id, job_type_id, job_type, job_date, start_time, comments, status, payment, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-        db.query(
-          jobQuery,
-          [
-            clientId,
-            jobType.id,
-            jobType.name,
-            jobDate,
-            normalizedStartTime,
-            comments,
-            "Pending",
-            normalizedPayment,
-            userId
-          ],
-          (insertJobErr, result) => {
-            if (insertJobErr) {
-              console.error("Error inserting job:", insertJobErr);
-              return res.status(500).json({ error: "Database error" });
-            }
-            return res.json({ message: "Job saved successfully", jobId: result.insertId });
-          }
-        );
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message || "Invalid request" });
       }
-      return undefined;
-    });
+      console.error("Error creating job:", error);
+      return res.status(500).json({ error: "Database error" });
+    }
   }
 );
 
@@ -652,6 +1176,261 @@ app.patch("/jobs/:id/comments", requireAuth, (req, res) => {
   });
 });
 
+app.get("/billing/summary", requireAuth, async (req, res) => {
+  try {
+    const subscriptionContext = await getSubscriptionContextForUser(req.user.id);
+    return res.json(subscriptionContext.summary);
+  } catch (error) {
+    console.error("Error fetching billing summary:", error);
+    const message =
+      error.code === "ER_NO_SUCH_TABLE"
+        ? "Billing tables are missing. Run the backend migrations."
+        : error.message || error.stripe?.error?.message || "Unable to load billing details";
+    return res.status(error.statusCode || 500).json({ error: message });
+  }
+});
+
+app.post("/billing/checkout-session", requireAuth, async (req, res) => {
+  const planCode = String(req.body?.planCode || "").trim().toLowerCase();
+  if (!SELF_SERVE_PLAN_CODES.includes(planCode) || planCode === "free") {
+    return res.status(400).json({ error: "Select a valid paid plan" });
+  }
+
+  if (!isStripeReady()) {
+    return res.status(503).json({ error: "Stripe checkout is not configured" });
+  }
+
+  try {
+    const subscriptionContext = await getSubscriptionContextForUser(req.user.id);
+    const customerId = await ensureStripeCustomerForUser(subscriptionContext, req.user);
+    const checkoutSession = await createCheckoutSession({
+      user: req.user,
+      planCode,
+      customerId
+    });
+
+    return res.json({
+      message: "Continue to Stripe Checkout",
+      checkoutUrl: checkoutSession.url,
+      checkoutSessionId: checkoutSession.id,
+      subscription: subscriptionContext.summary
+    });
+  } catch (error) {
+    console.error("Error creating Stripe checkout session:", error);
+    return res.status(error.statusCode || 500).json({ error: error.message || "Database error" });
+  }
+});
+
+app.post("/billing/portal-session", requireAuth, async (req, res) => {
+  if (!isStripeReady()) {
+    return res.status(503).json({ error: "Stripe customer portal is not configured" });
+  }
+
+  try {
+    const subscriptionContext = await getSubscriptionContextForUser(req.user.id);
+    const customerId = subscriptionContext.row?.stripe_customer_id || null;
+    if (!customerId) {
+      return res.status(400).json({ error: "No Stripe customer exists for this account yet" });
+    }
+
+    const portalSession = await createPortalSession({
+      customerId,
+      returnUrl: STRIPE_CONFIG.portalReturnUrl || STRIPE_CONFIG.successUrl || STRIPE_CONFIG.cancelUrl
+    });
+
+    return res.json({
+      message: "Open Stripe to manage your subscription",
+      portalUrl: portalSession.url,
+      portalSessionId: portalSession.id,
+      subscription: subscriptionContext.summary
+    });
+  } catch (error) {
+    console.error("Error creating Stripe portal session:", error);
+    return res.status(error.statusCode || 500).json({ error: error.message || "Database error" });
+  }
+});
+
+app.put(
+  "/billing/subscription",
+  requireAuth,
+  [
+    body("planCode")
+      .trim()
+      .isIn(SELF_SERVE_PLAN_CODES)
+      .withMessage("Select a valid plan")
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const nextPlanCode = String(req.body.planCode || "").trim().toLowerCase();
+    if (!SELF_SERVE_PLAN_CODES.includes(nextPlanCode)) {
+      return res.status(400).json({ error: "Select a valid plan" });
+    }
+
+    try {
+      const subscriptionContext = await getSubscriptionContextForUser(req.user.id);
+
+      if (nextPlanCode === "free") {
+        if (subscriptionContext.summary.planCode !== "free" && isStripeReady()) {
+          const customerId = subscriptionContext.row?.stripe_customer_id || null;
+          if (customerId) {
+            const portalSession = await createPortalSession({
+              customerId,
+              returnUrl: STRIPE_CONFIG.portalReturnUrl || STRIPE_CONFIG.successUrl || STRIPE_CONFIG.cancelUrl
+            });
+            return res.json({
+              message: "Open Stripe to cancel or change your subscription",
+              portalUrl: portalSession.url,
+              portalSessionId: portalSession.id,
+              subscription: subscriptionContext.summary
+            });
+          }
+        }
+
+        await seedDefaultSubscriptionForUser(req.user.id);
+        await db.promise().query(
+          `
+            UPDATE account_subscriptions
+            SET plan_code = 'free',
+                subscription_status = 'active',
+                trial_ends_at = NULL
+            WHERE user_id = ?
+          `,
+          [req.user.id]
+        );
+
+        const refreshed = await getSubscriptionContextForUser(req.user.id);
+        return res.json({
+          message: "Plan updated to Free",
+          subscription: refreshed.summary
+        });
+      }
+
+      if (subscriptionContext.summary.planCode !== "free" && isStripeReady()) {
+        const customerId = subscriptionContext.row?.stripe_customer_id || null;
+        if (customerId) {
+          const portalSession = await createPortalSession({
+            customerId,
+            returnUrl: STRIPE_CONFIG.portalReturnUrl || STRIPE_CONFIG.successUrl || STRIPE_CONFIG.cancelUrl
+          });
+          return res.json({
+            message: "Open Stripe to change your subscription",
+            portalUrl: portalSession.url,
+            portalSessionId: portalSession.id,
+            subscription: subscriptionContext.summary
+          });
+        }
+      }
+
+      if (!isStripeReady()) {
+        await seedDefaultSubscriptionForUser(req.user.id);
+        await db.promise().query(
+          `
+            UPDATE account_subscriptions
+            SET plan_code = ?,
+                subscription_status = 'active',
+                trial_ends_at = NULL
+            WHERE user_id = ?
+          `,
+          [nextPlanCode, req.user.id]
+        );
+
+        const refreshed = await getSubscriptionContextForUser(req.user.id);
+        return res.json({
+          message: `Plan updated to ${refreshed.summary.planName}`,
+          subscription: refreshed.summary
+        });
+      }
+
+      const checkoutSession = await createCheckoutSession({
+        user: req.user,
+        planCode: nextPlanCode,
+        customerId: subscriptionContext.row?.stripe_customer_id || null
+      });
+
+      return res.json({
+        message: "Continue to Stripe Checkout",
+        checkoutUrl: checkoutSession.url,
+        checkoutSessionId: checkoutSession.id,
+        subscription: subscriptionContext.summary
+      });
+    } catch (error) {
+      console.error("Error updating billing plan:", error);
+      const message =
+        error.code === "ER_NO_SUCH_TABLE"
+          ? "Billing tables are missing. Run the backend migrations."
+          : error.message || error.stripe?.error?.message || "Unable to update billing plan";
+      return res.status(error.statusCode || 500).json({ error: message });
+    }
+  }
+);
+
+app.post("/billing/webhook", async (req, res) => {
+  const stripeConfig = getStripeConfig();
+  if (!stripeConfig.webhookSecret) {
+    return res.status(503).json({ error: "Stripe webhook secret is not configured" });
+  }
+
+  const signature = req.headers["stripe-signature"] || req.headers["Stripe-Signature"] || "";
+  const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+
+  if (!verifyStripeWebhookSignature(rawBody, signature, stripeConfig.webhookSecret)) {
+    return res.status(400).json({ error: "Invalid Stripe signature" });
+  }
+
+  let event;
+  try {
+    event = JSON.parse(rawBody.toString("utf8"));
+  } catch (error) {
+    return res.status(400).json({ error: "Invalid webhook payload" });
+  }
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const checkoutSession = event.data?.object || {};
+        if (checkoutSession.mode === "subscription" && checkoutSession.subscription) {
+          const subscription = await stripeRequest(`/subscriptions/${checkoutSession.subscription}`, {
+            method: "GET"
+          });
+          await syncAccountSubscriptionFromStripeSubscription(subscription);
+        }
+        break;
+      }
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        await syncAccountSubscriptionFromStripeSubscription(event.data?.object || null);
+        break;
+      }
+      case "customer.subscription.deleted": {
+        const subscription = event.data?.object || {};
+        const userId = Number(subscription.metadata?.user_id || 0);
+        if (userId) {
+          await saveStripeSubscriptionState({
+            userId,
+            planCode: "free",
+            subscriptionStatus: "canceled",
+            stripeCustomerId: subscription.customer || null,
+            stripeSubscriptionId: subscription.id || null,
+            currentPeriodStartsAt: formatDateOnly(startOfDay()),
+            currentPeriodEndsAt: formatDateOnly(addMonthsKeepingDay(startOfDay(), 1)),
+            trialEndsAt: null
+          });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    return res.json({ received: true });
+  } catch (error) {
+    console.error("Stripe webhook handling failed:", error);
+    return res.status(500).json({ error: "Webhook processing failed" });
+  }
+});
+
 app.get("/job-types", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.promise().query(
@@ -692,6 +1471,7 @@ app.post(
         : await getNextJobTypeSortOrder(req.user.id);
 
     try {
+      await ensurePlanAllowsJobTypeManagement(req.user.id);
       const existing = await fetchJobTypeByName(req.user.id, name);
       if (existing) {
         return res.status(409).json({ error: "Job type already exists" });
@@ -709,6 +1489,13 @@ app.post(
       return res.status(201).json(created);
     } catch (error) {
       console.error("Error creating job type:", error);
+      if (error.code === "FEATURE_NOT_AVAILABLE") {
+        return res.status(error.statusCode || 403).json({
+          error: error.message,
+          code: error.code,
+          subscription: error.subscription || null
+        });
+      }
       if (error.code === "ER_DUP_ENTRY") {
         return res.status(409).json({ error: "Job type already exists" });
       }
@@ -748,6 +1535,7 @@ app.put(
         : existing.sort_order;
 
     try {
+      await ensurePlanAllowsJobTypeManagement(req.user.id);
       const duplicate = await fetchJobTypeByName(req.user.id, name);
       if (duplicate && duplicate.id !== jobTypeId) {
         return res.status(409).json({ error: "Job type already exists" });
@@ -766,6 +1554,13 @@ app.put(
       return res.json(updated);
     } catch (error) {
       console.error("Error updating job type:", error);
+      if (error.code === "FEATURE_NOT_AVAILABLE") {
+        return res.status(error.statusCode || 403).json({
+          error: error.message,
+          code: error.code,
+          subscription: error.subscription || null
+        });
+      }
       if (error.code === "ER_DUP_ENTRY") {
         return res.status(409).json({ error: "Job type already exists" });
       }
@@ -781,6 +1576,7 @@ app.delete("/job-types/:id", requireAuth, async (req, res) => {
   }
 
   try {
+    await ensurePlanAllowsJobTypeManagement(req.user.id);
     const jobType = await fetchJobTypeById(req.user.id, jobTypeId);
     if (!jobType) {
       return res.status(404).json({ error: "Job type not found" });
@@ -803,6 +1599,13 @@ app.delete("/job-types/:id", requireAuth, async (req, res) => {
     return res.json({ message: "Job type deleted successfully" });
   } catch (error) {
     console.error("Error deleting job type:", error);
+    if (error.code === "FEATURE_NOT_AVAILABLE") {
+      return res.status(error.statusCode || 403).json({
+        error: error.message,
+        code: error.code,
+        subscription: error.subscription || null
+      });
+    }
     return res.status(500).json({ error: "Database error" });
   }
 });

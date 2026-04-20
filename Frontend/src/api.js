@@ -1,4 +1,6 @@
-export const API_BASE = import.meta.env?.VITE_API_BASE || 'http://localhost:5000'
+const normalizeApiBase = (value) => String(value || '').trim().replace(/\/+$/, '')
+
+export const API_BASE = normalizeApiBase(import.meta.env?.VITE_API_BASE || 'http://localhost:5000')
 
 const normalizeBase64Url = (value) => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
