@@ -132,6 +132,7 @@ const ACCESS_TOKEN_TTL_MS = Number.parseInt(process.env.ACCESS_TOKEN_TTL_MS || `
 const REFRESH_TOKEN_TTL_DAYS = Number.parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || "14", 10);
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "";
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "";
+const RUN_MIGRATIONS_ON_BOOT = (process.env.RUN_MIGRATIONS_ON_BOOT || "true") !== "false";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || (IS_PRODUCTION ? "None" : "Lax");
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || `${IS_PRODUCTION}`) === "true";
@@ -1846,7 +1847,11 @@ const HOST = process.env.HOST || "0.0.0.0";
 (async () => {
   try {
     validateRuntimeConfig();
-    await runMigrations(db.promise());
+    if (RUN_MIGRATIONS_ON_BOOT) {
+      await runMigrations(db.promise());
+    } else {
+      console.warn("Skipping database migrations because RUN_MIGRATIONS_ON_BOOT=false");
+    }
     app.listen(PORT, HOST, () => {
       console.log(`Server running on ${HOST}:${PORT}`);
     });
