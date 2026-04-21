@@ -74,3 +74,31 @@ export function EmptyState({ title, description, action, className = '' }) {
     </div>
   )
 }
+
+export function FlowStepper({ steps, currentStep, onStepSelect }) {
+  return (
+    <div className="flow-stepper" role="tablist" aria-label="Job creation steps">
+      {steps.map((step, index) => {
+        const state =
+          index === currentStep ? 'current' : index < currentStep ? 'complete' : 'upcoming'
+
+        return (
+          <button
+            key={step.key}
+            type="button"
+            role="tab"
+            aria-selected={index === currentStep}
+            className={`flow-stepper__item flow-stepper__item--${state}`}
+            onClick={() => onStepSelect(index)}
+          >
+            <span className="flow-stepper__index">{index + 1}</span>
+            <span className="flow-stepper__copy">
+              <span className="flow-stepper__title">{step.title}</span>
+              <span className="flow-stepper__description">{step.description}</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}

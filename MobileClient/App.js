@@ -262,6 +262,21 @@ const formatTimeRange = (value) => {
   })}`
 }
 
+const formatSchedulePreview = (jobDate, startTime) => {
+  const date = parseDateValue(jobDate)
+  const dateLabel = date
+    ? date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      })
+    : 'Date not set'
+
+  if (!startTime) return `${dateLabel} | Time not set`
+
+  return `${dateLabel} | ${formatTimeRange(startTime)}`
+}
+
 const normalizePhoneDigits = (value) =>
   String(value || '').replace(/\D/g, '').slice(0, 15)
 
@@ -632,6 +647,17 @@ const getClientSuggestions = (clients, query, field) => {
   return clients.filter((client) => String(client[field] || '').toLowerCase().includes(value))
 }
 
+const searchClients = (clients, query) => {
+  const value = String(query || '').trim().toLowerCase()
+  if (!value) return clients
+
+  return clients.filter((client) =>
+    [client.name, client.phone, client.address].some((fieldValue) =>
+      String(fieldValue || '').toLowerCase().includes(value)
+    )
+  )
+}
+
 const applyClientDetails = (client) => ({
   name: client.name || '',
   phone: normalizePhoneDigits(client.phone || ''),
@@ -671,8 +697,11 @@ export default function App() {
   const [jobTypeFormError, setJobTypeFormError] = useState('')
   const [jobTypeSaving, setJobTypeSaving] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
+  const [existingClientPickerVisible, setExistingClientPickerVisible] = useState(false)
+  const [existingClientPickerQuery, setExistingClientPickerQuery] = useState('')
   const [calendarView, setCalendarView] = useState('day')
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => startOfDay(new Date()))
+  const [calendarJobTypesVisible, setCalendarJobTypesVisible] = useState(false)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -833,6 +862,29 @@ export default function App() {
   }, [session])
 
   const clients = useMemo(() => buildClients(jobs), [jobs])
+  const jobsGroupedByDate = useMemo(() => {
+    const groups = new Map()
+
+    jobs.forEach((job) => {
+      const dateKey = formatDateValue(job.job_date) || 'unscheduled'
+      if (!groups.has(dateKey)) {
+        groups.set(dateKey, [])
+      }
+      groups.get(dateKey).push(job)
+    })
+
+    return Array.from(groups.entries())
+      .sort(([firstDate], [secondDate]) => {
+        if (firstDate === 'unscheduled') return 1
+        if (secondDate === 'unscheduled') return -1
+        return getDateTimestamp(firstDate) - getDateTimestamp(secondDate)
+      })
+      .map(([dateKey, groupedJobs]) => ({
+        dateKey,
+        title: dateKey === 'unscheduled' ? 'No date assigned' : formatFullDate(dateKey),
+        jobs: groupedJobs
+      }))
+  }, [jobs])
   const jobTypeOptions = useMemo(() => {
     const source = jobTypes.length > 0 ? jobTypes : JOB_TYPE_DEFAULTS
     return [...source].sort((first, second) => {
@@ -855,6 +907,10 @@ export default function App() {
       )
     )
   }, [clients, clientSearch])
+  const existingClientPickerClients = useMemo(
+    () => searchClients(clients, existingClientPickerQuery),
+    [clients, existingClientPickerQuery]
+  )
 
   const jobsByDate = useMemo(() => {
     const groupedJobs = new Map()
@@ -1499,17 +1555,16 @@ export default function App() {
       const dayJobs = jobsByDate.get(toDateKey(calendarAnchorDate)) || []
       const { scheduledJobs, unscheduledJobs, timelineStartMinutes, visibleHourCount, timeSlots } = buildDayTimeline(dayJobs)
       const timelineHeight = visibleHourCount * DAY_TIMELINE_ROW_HEIGHT
+      const totalGrossIncomeToday = dayJobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0)
 
       return (
         <>
-          <View style={styles.calendarHero}>
-            <Text style={styles.calendarHeroWeekday}>{calendarAnchorDate.toLocaleDateString('en-US', { weekday: 'short' })}</Text>
-            <Text style={styles.calendarHeroDay}>{calendarAnchorDate.getDate()}</Text>
-            <Text style={styles.calendarHeroMonth}>{calendarAnchorDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
-          </View>
           <View style={commonStyles.panel}>
             <Text style={commonStyles.heading3}>Appointments for the day</Text>
-            <Text style={commonStyles.text}>{dayJobs.length} scheduled job{dayJobs.length === 1 ? '' : 's'}</Text>
+            <View style={styles.calendarDaySummaryRow}>
+              <Text style={commonStyles.text}>{dayJobs.length} scheduled job{dayJobs.length === 1 ? '' : 's'}</Text>
+              <Text style={styles.calendarGrossIncomeText}>Gross today: {formatCurrency(totalGrossIncomeToday)}</Text>
+            </View>
             {dayJobs.length === 0 ? (
               <View style={styles.calendarEmptyState}>
                 <Text style={commonStyles.text}>No jobs are scheduled for this day.</Text>
@@ -1555,6 +1610,7 @@ export default function App() {
       return weekDays.map((date) => {
         const dateKey = toDateKey(date)
         const dayJobs = jobsByDate.get(dateKey) || []
+        const dayGross = dayJobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0)
 
         return (
           <View key={dateKey} style={[commonStyles.panel, dateKey === calendarTodayKey ? styles.calendarPanelToday : null]}>
@@ -1564,6 +1620,7 @@ export default function App() {
                 <Text style={commonStyles.chipText}>{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
               </View>
             </View>
+            {dayJobs.length > 0 ? <Text style={styles.calendarGrossSubtext}>Gross {formatCurrency(dayGross)}</Text> : null}
             {dayJobs.length === 0 ? (
               <Text style={commonStyles.text}>No jobs</Text>
             ) : (
@@ -1585,6 +1642,7 @@ export default function App() {
           {monthDays.map((date) => {
             const dateKey = toDateKey(date)
             const dayJobs = jobsByDate.get(dateKey) || []
+            const dayGross = dayJobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0)
             const palette = dayJobs[0] ? getJobTypeColors(dayJobs[0].job_type_color || dayJobs[0].job_type, jobTypes) : null
 
             return (
@@ -1605,6 +1663,7 @@ export default function App() {
                   <>
                     <View style={[styles.monthCellDot, { backgroundColor: palette.background }]} />
                     <Text style={styles.monthCellCount}>{dayJobs.length} job{dayJobs.length === 1 ? '' : 's'}</Text>
+                    <Text style={styles.monthCellGross}>{formatCurrency(dayGross)}</Text>
                   </>
                 ) : (
                   <Text style={styles.monthCellCount}>Open</Text>
@@ -1625,6 +1684,7 @@ export default function App() {
         const jobDate = parseDateValue(job.job_date)
         return jobDate && jobDate >= monthStart && jobDate <= monthEnd
       })
+      const monthGross = monthJobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0)
 
       return (
         <Pressable
@@ -1637,10 +1697,11 @@ export default function App() {
         >
           <View style={styles.calendarSectionHeader}>
             <Text style={commonStyles.heading3}>{monthDate.toLocaleDateString('en-US', { month: 'long' })}</Text>
-            <View style={commonStyles.chip}>
-              <Text style={commonStyles.chipText}>{monthJobs.length} jobs</Text>
+              <View style={commonStyles.chip}>
+                <Text style={commonStyles.chipText}>{monthJobs.length} jobs</Text>
+              </View>
             </View>
-          </View>
+          {monthJobs.length > 0 ? <Text style={styles.calendarGrossSubtext}>Gross {formatCurrency(monthGross)}</Text> : null}
           <View style={styles.yearLegendRow}>
             {jobTypeOptions.map((jobType) => {
               const count = monthJobs.filter((job) => normalizeJobTypeKey(job.job_type) === normalizeJobTypeKey(jobType.name)).length
@@ -1701,6 +1762,19 @@ export default function App() {
       ]
     )
   }
+
+  const jobCreationSchedule = formatSchedulePreview(jobForm.jobDate, jobForm.startTime)
+  const currentPageTitle =
+    activeTab === 'jobs-new'
+      ? 'Create a new job'
+      : activeTab === 'jobs'
+        ? 'Job dashboard'
+        : activeTab === 'clients'
+          ? 'Client relationships'
+        : activeTab === 'billing'
+          ? 'Billing and plans'
+          : 'Calendar overview'
+  const navStickyIndex = billingSummary?.entitlements?.creationBlocked ? 2 : 1
 
   if (!ready) {
     return (
@@ -1790,23 +1864,21 @@ export default function App() {
           contentContainerStyle={commonStyles.content}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
+          stickyHeaderIndices={[navStickyIndex]}
         >
-          <Panel title={activeTab === 'jobs-new' ? 'Create a new job' : activeTab === 'jobs' ? 'Job dashboard' : activeTab === 'clients' ? 'Client relationships' : activeTab === 'billing' ? 'Billing and plans' : 'Calendar overview'} subtitle="Workspace overview">
-            <Text style={commonStyles.text}>Signed in as {session.user?.name || session.user?.email || 'Workspace user'}.</Text>
-            {billingSummary ? (
-              <>
-                <Text style={commonStyles.text}>
-                  {billingSummary.planName} plan{billingSummary.usage?.monthlyClientLimit === null
-                    ? ' with unlimited records.'
-                    : ` with ${billingSummary.usage.monthlyClientCreations}/${billingSummary.usage.monthlyClientLimit} clients and ${billingSummary.usage.monthlyJobCreations}/${billingSummary.usage.monthlyJobLimit} jobs used this month.`}
-                </Text>
-                <Text style={commonStyles.helperText}>Resets on {formatBillingResetDate(billingSummary.currentPeriodEndsAt)}.</Text>
-              </>
-            ) : null}
-            <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={logout}>
-              <Text style={commonStyles.buttonText}>Logout</Text>
+          <View style={styles.workspaceOverview}>
+            <View style={styles.workspaceOverviewCopy}>
+              <Text style={commonStyles.muted}>Workspace overview</Text>
+              <Text style={styles.workspaceOverviewTitle}>{currentPageTitle}</Text>
+              <Text style={styles.workspaceOverviewMeta}>
+                {session.user?.name || session.user?.email || 'Workspace user'}
+                {billingSummary ? ` • ${billingSummary.planName}` : ''}
+              </Text>
+            </View>
+            <Pressable style={styles.workspaceOverviewAction} onPress={logout}>
+              <Text style={styles.workspaceOverviewActionText}>Logout</Text>
             </Pressable>
-          </Panel>
+          </View>
           {billingSummary?.entitlements?.creationBlocked ? (
             <Panel title="Upgrade to keep creating" subtitle="Free plan limit reached">
               <Text style={commonStyles.text}>
@@ -1817,7 +1889,7 @@ export default function App() {
               </Pressable>
             </Panel>
           ) : null}
-          <View style={commonStyles.panel}>
+          <View style={[commonStyles.panel, styles.stickyNavWrap]}>
             <Text style={commonStyles.muted}>Navigation</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={styles.navRow}>{NAV_ITEMS.map((item) => <Chip key={item.key} active={activeTab === item.key} label={item.label} onPress={() => setActiveTab(item.key)} />)}</View>
@@ -1827,31 +1899,145 @@ export default function App() {
           {activeTab === 'jobs' ? (
             <>
               <Panel title="All jobs">
-                <Text style={commonStyles.text}>Each appointment becomes its own card so the desktop table translates cleanly to mobile.</Text>
+                <Text style={commonStyles.text}>Jobs are grouped by date so the day plan is easier to scan on mobile.</Text>
                 <View style={commonStyles.chip}><Text style={commonStyles.chipText}>Total payments {formatCurrency(jobs.reduce((sum, job) => sum + (Number(job.payment) || 0), 0))}</Text></View>
               </Panel>
               {jobsLoading ? <Panel><Text style={commonStyles.text}>Loading jobs...</Text></Panel> : null}
               {jobsError ? <Panel><Text style={commonStyles.errorText}>{jobsError}</Text></Panel> : null}
-              {!jobsLoading && !jobsError ? jobs.map((job) => <JobCard key={job.id} job={job} onPress={() => setSelectedJob(job)} onDelete={() => confirmDeleteJob(job)} />) : null}
+              {!jobsLoading && !jobsError ? jobsGroupedByDate.map((group) => (
+                <Panel key={group.dateKey} title={group.title} subtitle={`${group.jobs.length} job${group.jobs.length === 1 ? '' : 's'}`}>
+                  {group.jobs.map((job) => (
+                    <JobCard key={job.id} job={job} onPress={() => setSelectedJob(job)} onDelete={() => confirmDeleteJob(job)} />
+                  ))}
+                </Panel>
+              )) : null}
             </>
           ) : null}
 
           {activeTab === 'jobs-new' ? (
             <>
-              {billingSummary ? (
-                <Panel title="Plan usage" subtitle={billingSummary.planName}>
-                  <Text style={commonStyles.text}>
-                    {billingSummary.usage?.monthlyClientLimit === null
-                      ? 'Unlimited clients and jobs are available on this plan.'
-                      : `${billingSummary.usage.monthlyClientCreations}/${billingSummary.usage.monthlyClientLimit} clients and ${billingSummary.usage.monthlyJobCreations}/${billingSummary.usage.monthlyJobLimit} jobs used this month.`}
-                  </Text>
-                  <Text style={commonStyles.helperText}>Resets on {formatBillingResetDate(billingSummary.currentPeriodEndsAt)}.</Text>
-                  <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={() => setActiveTab('billing')}>
-                    <Text style={commonStyles.buttonText}>Manage billing</Text>
-                  </Pressable>
-                </Panel>
-              ) : null}
-              <Panel title="Job types" subtitle="Customize">
+              <ScreenHero
+                eyebrow="New work order"
+                title="Create a job the field team can act on immediately"
+                description="Capture the client, lock in the visit, and leave clean dispatch context without making the office fight a long form."
+              />
+
+              <WorkflowSection
+                step="1"
+                title="Confirm client details"
+                description="Verify the contact information and service location before you book the work."
+              >
+                <Pressable
+                  style={[commonStyles.button, commonStyles.buttonSecondary, styles.useExistingClientButton]}
+                  onPress={() => {
+                    setExistingClientPickerQuery('')
+                    setExistingClientPickerVisible(true)
+                  }}
+                >
+                  <Text style={commonStyles.buttonText}>Use Existing Client</Text>
+                </Pressable>
+                <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, name: value }))
+                  setJobErrors((current) => ({ ...current, name: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.name} placeholder="Jane Smith" helperText="Enter a new client name or adjust the selected client details here." />
+                <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
+                  setJobErrors((current) => ({ ...current, phone: '' }))
+                  setJobStatus(null)
+                  setJobSuggestionField('phone')
+                }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
+                <ClientSuggestions
+                  clients={clients}
+                  query={jobForm.phone}
+                  field="phone"
+                  visible={jobSuggestionField === 'phone'}
+                  onSelect={(client) => {
+                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                    setJobSuggestionField(null)
+                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                    setJobStatus(null)
+                  }}
+                  onCreateNew={() => setJobSuggestionField(null)}
+                  createLabel="Keep this as a new client"
+                />
+                <FormField label="Service address" value={jobForm.address} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, address: value }))
+                  setJobErrors((current) => ({ ...current, address: '' }))
+                  setJobStatus(null)
+                  setJobSuggestionField('address')
+                }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={jobForm.address} />} helperText="Include street, city, and unit details so the crew can find the appointment quickly." />
+                <ClientSuggestions
+                  clients={clients}
+                  query={jobForm.address}
+                  field="address"
+                  visible={jobSuggestionField === 'address'}
+                  onSelect={(client) => {
+                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+                    setJobSuggestionField(null)
+                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+                    setJobStatus(null)
+                  }}
+                  onCreateNew={() => setJobSuggestionField(null)}
+                  createLabel="Use this address"
+                />
+              </WorkflowSection>
+
+              <WorkflowSection
+                step="2"
+                title="Enter job details"
+                description="Set the type of work, the price, and the notes that make the job operationally clear."
+              >
+                <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
+                  setJobForm((current) => ({ ...current, jobType: value }))
+                  setJobErrors((current) => ({ ...current, jobType: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.jobType} options={jobTypeOptions.map((jobType) => jobType.name)} />
+                <CurrencyField label="Quoted amount" value={jobForm.payment} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, payment: value }))
+                  setJobErrors((current) => ({ ...current, payment: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.payment} placeholder="0.00" />
+                <View style={styles.inlineFieldRow}>
+                  <View style={styles.inlineFieldColumn}>
+                    <DateField label="Date" value={jobForm.jobDate} onChange={(value) => {
+                      setJobForm((current) => ({ ...current, jobDate: value }))
+                      setJobErrors((current) => ({ ...current, jobDate: '' }))
+                      setJobStatus(null)
+                    }} error={jobErrors.jobDate} />
+                  </View>
+                  <View style={styles.inlineFieldColumn}>
+                    <TimeField label="Start time" value={jobForm.startTime} onChange={(value) => {
+                      setJobForm((current) => ({ ...current, startTime: value }))
+                      setJobErrors((current) => ({ ...current, startTime: '' }))
+                      setJobStatus(null)
+                    }} error={jobErrors.startTime} />
+                  </View>
+                </View>
+                <FormField label="Dispatch notes" value={jobForm.comments} onChangeText={(value) => {
+                  setJobForm((current) => ({ ...current, comments: value }))
+                  setJobErrors((current) => ({ ...current, comments: '' }))
+                  setJobStatus(null)
+                }} error={jobErrors.comments} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
+                <View style={styles.workflowHintCard}>
+                  <Text style={styles.summaryCardLabel}>Schedule preview</Text>
+                  <Text style={styles.summaryCardValue}>{jobCreationSchedule}</Text>
+                </View>
+              </WorkflowSection>
+
+              <Panel title="Save the job" subtitle="Step 3">
+                <Text style={commonStyles.text}>
+                  {creationBlocked
+                    ? `New client and job creation is paused until ${formatBillingResetDate(billingSummary?.currentPeriodEndsAt)}.`
+                    : 'Create the job now so it is immediately available to office staff and technicians.'}
+                </Text>
+                {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
+                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary, styles.primarySaveButton]} onPress={submitJob} disabled={creationBlocked}>
+                  <Text style={commonStyles.buttonText}>{creationBlocked ? 'Upgrade or wait for reset' : 'Create Job'}</Text>
+                </Pressable>
+              </Panel>
+
+              <Panel title="Manage job types" subtitle="Secondary setup">
                 <Text style={commonStyles.text}>
                   Define the labels your business uses and choose the color that appears in the calendar.
                 </Text>
@@ -1947,93 +2133,6 @@ export default function App() {
                   </View>
                 )}
               </Panel>
-
-              <View style={commonStyles.panel}>
-                <Text style={commonStyles.sectionTitle}>Appointment details</Text>
-                <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
-                  setJobForm((current) => ({ ...current, name: value }))
-                  setJobErrors((current) => ({ ...current, name: '' }))
-                  setJobStatus(null)
-                  setJobSuggestionField('name')
-                }} error={jobErrors.name} placeholder="Jane Smith" />
-                <ClientSuggestions
-                  clients={clients}
-                  query={jobForm.name}
-                  field="name"
-                  visible={jobSuggestionField === 'name'}
-                  onSelect={(client) => {
-                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
-                    setJobSuggestionField(null)
-                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
-                    setJobStatus(null)
-                  }}
-                />
-                <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
-                  setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
-                  setJobErrors((current) => ({ ...current, phone: '' }))
-                  setJobStatus(null)
-                  setJobSuggestionField('phone')
-                }} error={jobErrors.phone} keyboardType="phone-pad" maxLength={15} placeholder={PHONE_EXAMPLE} helperText={`Enter digits only. Preview: ${formatPhonePreview(jobForm.phone)}`} />
-                <ClientSuggestions
-                  clients={clients}
-                  query={jobForm.phone}
-                  field="phone"
-                  visible={jobSuggestionField === 'phone'}
-                  onSelect={(client) => {
-                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
-                    setJobSuggestionField(null)
-                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
-                    setJobStatus(null)
-                  }}
-                />
-                <FormField label="Address" value={jobForm.address} onChangeText={(value) => {
-                  setJobForm((current) => ({ ...current, address: value }))
-                  setJobErrors((current) => ({ ...current, address: '' }))
-                  setJobStatus(null)
-                  setJobSuggestionField('address')
-                }} error={jobErrors.address} placeholder="123 Main St, Springfield, IL 62704" belowInput={<GoogleMapsLink address={jobForm.address} />} helperText="Include street, city, and any unit details so the crew can find the appointment quickly." />
-                <ClientSuggestions
-                  clients={clients}
-                  query={jobForm.address}
-                  field="address"
-                  visible={jobSuggestionField === 'address'}
-                  onSelect={(client) => {
-                    setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
-                    setJobSuggestionField(null)
-                    setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
-                    setJobStatus(null)
-                  }}
-                />
-                <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
-                  setJobForm((current) => ({ ...current, jobType: value }))
-                  setJobErrors((current) => ({ ...current, jobType: '' }))
-                  setJobStatus(null)
-                }} error={jobErrors.jobType} options={jobTypeOptions.map((jobType) => jobType.name)} />
-                <DateField label="Date" value={jobForm.jobDate} onChange={(value) => {
-                  setJobForm((current) => ({ ...current, jobDate: value }))
-                  setJobErrors((current) => ({ ...current, jobDate: '' }))
-                  setJobStatus(null)
-                }} error={jobErrors.jobDate} />
-                <TimeField label="Start time" value={jobForm.startTime} onChange={(value) => {
-                  setJobForm((current) => ({ ...current, startTime: value }))
-                  setJobErrors((current) => ({ ...current, startTime: '' }))
-                  setJobStatus(null)
-                }} error={jobErrors.startTime} />
-                <CurrencyField label="Payment" value={jobForm.payment} onChangeText={(value) => {
-                  setJobForm((current) => ({ ...current, payment: value }))
-                  setJobErrors((current) => ({ ...current, payment: '' }))
-                  setJobStatus(null)
-                }} error={jobErrors.payment} placeholder="0.00" />
-                <FormField label="Comments" value={jobForm.comments} onChangeText={(value) => {
-                  setJobForm((current) => ({ ...current, comments: value }))
-                  setJobErrors((current) => ({ ...current, comments: '' }))
-                  setJobStatus(null)
-                }} error={jobErrors.comments} multiline placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival." helperText="Add gate codes, parking notes, scope details, or anything the team should know before arrival." />
-                {jobStatus ? <Text style={jobStatus.type === 'error' ? commonStyles.errorText : jobStatus.type === 'success' ? commonStyles.successText : commonStyles.text}>{jobStatus.message}</Text> : null}
-                <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitJob} disabled={creationBlocked}>
-                  <Text style={commonStyles.buttonText}>{creationBlocked ? 'Upgrade or wait for reset' : 'Save appointment'}</Text>
-                </Pressable>
-              </View>
             </>
           ) : null}
 
@@ -2181,7 +2280,10 @@ export default function App() {
           {activeTab === 'calendar' ? (
             <>
               <View style={commonStyles.panel}>
-                <Text style={commonStyles.sectionTitle}>Job calendar</Text>
+                <View style={styles.calendarTitleRow}>
+                  <Text style={commonStyles.sectionTitle}>Job calendar</Text>
+                  <Text style={styles.calendarRangeInline}>{getCalendarRangeLabel(calendarView, calendarAnchorDate)}</Text>
+                </View>
                 <Text style={commonStyles.text}>Switch between daily, weekly, monthly, and yearly views. Mobile opens on the daily schedule.</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                   <View style={styles.calendarViewTabs}>
@@ -2202,21 +2304,43 @@ export default function App() {
                     <Chip label="Next" onPress={() => stepCalendar(1)} />
                   </View>
                 </ScrollView>
-                <Text style={commonStyles.heading3}>{getCalendarRangeLabel(calendarView, calendarAnchorDate)}</Text>
-                <View style={styles.calendarLegend}>
-                  {jobTypeOptions.map((jobType) => (
-                    <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
-                      <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
-                      <Text style={styles.calendarLegendText}>{jobType.name}</Text>
-                    </View>
-                  ))}
-                </View>
+                <Pressable
+                  style={[commonStyles.button, commonStyles.buttonSecondary, styles.calendarLegendToggle]}
+                  onPress={() => setCalendarJobTypesVisible((current) => !current)}
+                >
+                  <Text style={commonStyles.buttonText}>
+                    {calendarJobTypesVisible ? 'Hide Job Types' : 'View Job Types'}
+                  </Text>
+                </Pressable>
+                {calendarJobTypesVisible ? (
+                  <View style={styles.calendarLegend}>
+                    {jobTypeOptions.map((jobType) => (
+                      <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
+                        <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
+                        <Text style={styles.calendarLegendText}>{jobType.name}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </View>
               {renderCalendarContent()}
             </>
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+      <ExistingClientPicker
+        visible={existingClientPickerVisible}
+        clients={existingClientPickerClients}
+        query={existingClientPickerQuery}
+        onChangeQuery={setExistingClientPickerQuery}
+        onClose={() => setExistingClientPickerVisible(false)}
+        onSelect={(client) => {
+          setJobForm((current) => ({ ...current, ...applyClientDetails(client) }))
+          setJobErrors((current) => ({ ...current, name: '', phone: '', address: '' }))
+          setJobStatus(null)
+          setExistingClientPickerVisible(false)
+        }}
+      />
       <JobModal job={selectedJob} clients={clients} jobTypes={jobTypes} onClose={() => setSelectedJob(null)} onSave={saveJobUpdates} onDelete={confirmDeleteJob} />
       <ClientModal client={selectedClient} clients={clients} onClose={() => setSelectedClient(null)} onSave={saveClientUpdates} />
     </SafeAreaView>
@@ -2233,6 +2357,87 @@ function Panel({ title, subtitle, children }) {
   )
 }
 
+function ScreenHero({ eyebrow, title, description, children }) {
+  return (
+    <View style={styles.screenHero}>
+      {eyebrow ? <Text style={commonStyles.muted}>{eyebrow}</Text> : null}
+      <Text style={styles.screenHeroTitle}>{title}</Text>
+      {description ? <Text style={commonStyles.text}>{description}</Text> : null}
+      {children}
+    </View>
+  )
+}
+
+function WorkflowSection({ step, title, description, children }) {
+  return (
+    <View style={styles.workflowSection}>
+      <View style={styles.workflowSectionHeader}>
+        <View style={styles.workflowStepBadge}>
+          <Text style={styles.workflowStepText}>{step}</Text>
+        </View>
+        <View style={styles.workflowSectionCopy}>
+          <Text style={styles.workflowSectionTitle}>{title}</Text>
+          {description ? <Text style={commonStyles.text}>{description}</Text> : null}
+        </View>
+      </View>
+      <View style={styles.workflowSectionBody}>{children}</View>
+    </View>
+  )
+}
+
+function ExistingClientPicker({ visible, clients, query, onChangeQuery, onClose, onSelect }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
+          <View style={styles.modalPanel}>
+            <View style={styles.modalContent}>
+              <Text style={commonStyles.sectionTitle}>Use existing client</Text>
+              <Text style={commonStyles.text}>Choose an existing client record instead of typing everything again.</Text>
+              <TextInput
+                style={commonStyles.input}
+                value={query}
+                onChangeText={onChangeQuery}
+                placeholder="Search by name, phone, or address"
+                placeholderTextColor={colors.textMuted}
+              />
+              <ScrollView
+                style={styles.existingClientList}
+                contentContainerStyle={styles.existingClientListContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {clients.length === 0 ? (
+                  <View style={styles.existingClientEmpty}>
+                    <Text style={commonStyles.text}>No matching clients found.</Text>
+                  </View>
+                ) : (
+                  clients.map((client) => (
+                    <Pressable
+                      key={client.id}
+                      style={({ pressed }) => [
+                        styles.existingClientItem,
+                        pressed ? styles.suggestionItemPressed : null
+                      ]}
+                      onPress={() => onSelect(client)}
+                    >
+                      <Text style={styles.suggestionName}>{client.name || 'No name'}</Text>
+                      <Text style={styles.suggestionMeta}>{formatPhonePreview(client.phone)}</Text>
+                      <Text style={styles.suggestionMeta}>{client.address || 'No address'}</Text>
+                    </Pressable>
+                  ))
+                )}
+              </ScrollView>
+              <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={onClose}>
+                <Text style={commonStyles.buttonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  )
+}
+
 function FormField({ label, error, helperText, belowInput = null, multiline, ...props }) {
   return (
     <View>
@@ -2245,13 +2450,30 @@ function FormField({ label, error, helperText, belowInput = null, multiline, ...
   )
 }
 
-function ClientSuggestions({ clients, query, field, visible, onSelect }) {
+function ClientSuggestions({ clients, query, field, visible, onSelect, onCreateNew, createLabel = 'Create New Client' }) {
   const matches = visible ? getClientSuggestions(clients, query, field).slice(0, 6) : []
+  const hasQuery = String(query || '').trim().length > 0
 
-  if (!visible || matches.length === 0) return null
+  if (!visible || (!hasQuery && matches.length === 0)) return null
 
   return (
     <View style={styles.suggestionBox}>
+      <View style={styles.suggestionHeader}>
+        <View style={styles.suggestionHeaderCopy}>
+          <Text style={styles.suggestionHeaderTitle}>Client matches</Text>
+          <Text style={styles.suggestionHeaderText}>Choose an existing client or continue with a new one.</Text>
+        </View>
+        {hasQuery && onCreateNew ? (
+          <Pressable style={styles.suggestionCreateButton} onPress={onCreateNew}>
+            <Text style={styles.suggestionCreateText}>{createLabel}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {matches.length === 0 ? (
+        <View style={styles.suggestionEmpty}>
+          <Text style={styles.suggestionHeaderText}>No close matches yet. Continue with this as a new client.</Text>
+        </View>
+      ) : null}
       {matches.map((client, index) => (
         <Pressable
           key={client.id ?? `${client.name || 'client'}-${client.phone || ''}-${client.address || ''}-${index}`}
@@ -2507,32 +2729,21 @@ function TimeField({ label, value, onChange, error }) {
 
 function JobCard({ job, onPress, onDelete }) {
   return (
-    <View style={commonStyles.panel}>
-      <View style={commonStyles.rowBetween}>
-        <Pressable style={styles.jobCardContent} onPress={onPress}>
-          <Text style={commonStyles.heading3}>{job.name}</Text>
-        </Pressable>
-        <View style={styles.jobCardActions}>
-          <View style={styles.cardActionRow}>
-            <View style={styles.statusActionChip}><Text style={commonStyles.chipText}>{job.status}</Text></View>
-            <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={onPress}>
-              <Text style={styles.inlineActionText}>Edit</Text>
-            </Pressable>
-            <Pressable style={styles.iconDeleteButton} onPress={onDelete}>
-              <Text style={styles.iconDeleteText}>X</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
+    <View style={styles.jobsListItem}>
       <Pressable style={styles.jobCardContent} onPress={onPress}>
+        <Text style={commonStyles.heading3}>{job.name || 'No client'}</Text>
         <Text style={commonStyles.text}>{formatDate(job.job_date)}</Text>
-        <Text style={commonStyles.text}>{formatTimeRange(job.start_time)}</Text>
-        <Text style={commonStyles.text}>{job.job_type}</Text>
-        <Text style={commonStyles.text}>{job.phone || '-'}</Text>
-        <Text style={commonStyles.text}>{job.address || '-'}</Text>
-        <Text style={commonStyles.text}>Payment: {formatCurrency(job.payment)}</Text>
-        <Text style={commonStyles.text}>{job.comments || 'No notes yet'}</Text>
+        <Text style={commonStyles.text}>{job.job_type || 'No job type'}</Text>
+        <Text style={styles.jobCardPayment}>Payment: {formatCurrency(job.payment)}</Text>
       </Pressable>
+      <View style={styles.jobCardActionsTopRight}>
+        <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={onPress}>
+          <Text style={styles.inlineActionText}>Edit</Text>
+        </Pressable>
+        <Pressable style={styles.iconDeleteButton} onPress={onDelete}>
+          <Text style={styles.iconDeleteText}>X</Text>
+        </Pressable>
+      </View>
     </View>
   )
 }
@@ -2782,6 +2993,142 @@ function JobModal({ job, clients, jobTypes = [], onClose, onSave, onDelete }) {
 const styles = StyleSheet.create({
   keyboardFrame: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  workspaceOverview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel
+  },
+  workspaceOverviewCopy: {
+    flex: 1,
+    gap: 4
+  },
+  workspaceOverviewTitle: {
+    color: colors.heading,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3
+  },
+  workspaceOverviewMeta: {
+    color: colors.text,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  workspaceOverviewAction: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.04)'
+  },
+  workspaceOverviewActionText: {
+    color: colors.heading,
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  stickyNavWrap: {
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    zIndex: 10
+  },
+  screenHero: {
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 28,
+    padding: 18,
+    gap: 10
+  },
+  screenHeroTitle: {
+    color: colors.heading,
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: -0.6
+  },
+  workflowSection: {
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 24,
+    padding: 16,
+    gap: 14
+  },
+  workflowSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12
+  },
+  workflowStepBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(109, 124, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: colors.borderStrong
+  },
+  workflowStepText: {
+    color: colors.heading,
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  workflowSectionCopy: {
+    flex: 1,
+    gap: 4
+  },
+  workflowSectionTitle: {
+    color: colors.heading,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.3
+  },
+  workflowSectionBody: {
+    gap: 14
+  },
+  summaryCardLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase'
+  },
+  summaryCardValue: {
+    color: colors.heading,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21
+  },
+  workflowHintCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: 'rgba(109, 124, 255, 0.1)',
+    gap: 6
+  },
+  inlineFieldRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start'
+  },
+  inlineFieldColumn: {
+    flex: 1
+  },
+  useExistingClientButton: {
+    alignSelf: 'flex-start',
+    minWidth: 180
+  },
   tabs: { flexDirection: 'row', gap: 8 },
   navRow: { flexDirection: 'row', gap: 10, paddingRight: 8 },
   chip: {
@@ -2859,6 +3206,28 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8
   },
+  jobsListItem: {
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.card,
+    padding: 14,
+    gap: 12
+  },
+  jobCardActionsTopRight: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  jobCardPayment: {
+    color: colors.heading,
+    fontSize: 15,
+    fontWeight: '800'
+  },
   cardActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2899,6 +3268,72 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: colors.panel
+  },
+  existingClientList: {
+    maxHeight: 320
+  },
+  existingClientListContent: {
+    gap: 10,
+    paddingTop: 4
+  },
+  existingClientItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.card
+  },
+  existingClientEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    backgroundColor: colors.card
+  },
+  suggestionHeader: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    gap: 10
+  },
+  suggestionHeaderCopy: {
+    gap: 4
+  },
+  suggestionHeaderTitle: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  suggestionHeaderText: {
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 18
+  },
+  suggestionCreateButton: {
+    minHeight: 34,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(109, 124, 255, 0.14)',
+    borderWidth: 1,
+    borderColor: colors.borderStrong
+  },
+  suggestionCreateText: {
+    color: colors.heading,
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  suggestionEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border
   },
   suggestionItem: {
     paddingHorizontal: 14,
@@ -2953,6 +3388,30 @@ const styles = StyleSheet.create({
   inlineTitle: { color: colors.heading, fontWeight: '700', fontSize: 16 },
   calendarViewTabs: { flexDirection: 'row', gap: 10, paddingRight: 8 },
   calendarControls: { flexDirection: 'row', gap: 10, paddingRight: 8 },
+  calendarTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12
+  },
+  calendarRangeInline: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    flexShrink: 1
+  },
+  calendarGrossSubtext: {
+    color: colors.heading,
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  calendarLegendToggle: {
+    alignSelf: 'stretch',
+    minHeight: 48,
+    borderRadius: 14,
+    paddingHorizontal: 16
+  },
   calendarLegend: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -3028,18 +3487,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8
   },
-  calendarHero: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    backgroundColor: colors.panel,
-    padding: 22,
-    alignItems: 'center',
-    gap: 8
-  },
-  calendarHeroWeekday: { color: colors.textMuted, fontSize: 13, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
-  calendarHeroDay: { color: colors.heading, fontSize: 68, fontWeight: '800', lineHeight: 72 },
-  calendarHeroMonth: { color: colors.text, fontSize: 16, fontWeight: '700' },
   calendarEmptyState: {
     marginTop: 12,
     minHeight: 120,
@@ -3050,6 +3497,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16
+  },
+  calendarDaySummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12
+  },
+  calendarGrossIncomeText: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginTop: -1
   },
   calendarTimelineShell: {
     marginTop: 12,
@@ -3200,6 +3660,7 @@ const styles = StyleSheet.create({
   monthCellDay: { color: colors.heading, fontSize: 18, fontWeight: '800' },
   monthCellDot: { width: 10, height: 10, borderRadius: 999 },
   monthCellCount: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  monthCellGross: { color: colors.heading, fontSize: 11, fontWeight: '800' },
   yearLegendRow: { gap: 10 },
   yearLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   yearLegendDot: { width: 10, height: 10, borderRadius: 999 },
@@ -3212,5 +3673,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(251, 113, 133, 0.14)',
     borderWidth: 1,
     borderColor: 'rgba(251, 113, 133, 0.4)'
+  },
+  primarySaveButton: {
+    minHeight: 58,
+    borderRadius: 20
   }
 })
