@@ -16,8 +16,7 @@ const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 const NAV_ITEMS = [
   { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
   { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
-  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' },
-  { label: 'Billing', path: '/billing', description: 'Check plan limits, reset dates, and upgrades.' }
+  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' }
 ]
 
 const PAGE_META = {
@@ -333,20 +332,13 @@ function AppContent() {
                   >
                     <span className="sidebar-section-label">Plan</span>
                     <strong>{subscriptionSummary.planName}</strong>
-                    <span>{subscriptionSummary.priceLabel}</span>
                     <span>
                       Resets {new Date(`${subscriptionSummary.currentPeriodEndsAt}T00:00:00`).toLocaleDateString('en-US', {
                         month: 'short',
                         day: 'numeric'
                       })}
                     </span>
-                    {subscriptionSummary.usage?.monthlyClientLimit !== null ? (
-                      <span>
-                        {subscriptionSummary.usage.monthlyClientCreations}/{subscriptionSummary.usage.monthlyClientLimit} clients | {subscriptionSummary.usage.monthlyJobCreations}/{subscriptionSummary.usage.monthlyJobLimit} jobs
-                      </span>
-                    ) : (
-                      <span>Unlimited records</span>
-                    )}
+                    <span className="page-header-plan__action">Manage subscription</span>
                   </button>
                 ) : null}
               </div>
