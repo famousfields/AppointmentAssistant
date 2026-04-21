@@ -32,9 +32,7 @@ import { colors, commonStyles } from './src/theme'
 const NAV_ITEMS = [
   { key: 'calendar', label: 'Calendar' },
   { key: 'jobs', label: 'Jobs' },
-  { key: 'jobs-new', label: 'New Job' },
-  { key: 'clients', label: 'Clients' },
-  { key: 'billing', label: 'Billing' }
+  { key: 'clients', label: 'Clients' }
 ]
 
 const JOB_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
@@ -1875,9 +1873,14 @@ export default function App() {
                 {billingSummary ? ` • ${billingSummary.planName}` : ''}
               </Text>
             </View>
-            <Pressable style={styles.workspaceOverviewAction} onPress={logout}>
-              <Text style={styles.workspaceOverviewActionText}>Logout</Text>
-            </Pressable>
+            <View style={styles.workspaceOverviewActions}>
+              <Pressable style={styles.workspaceOverviewAction} onPress={logout}>
+                <Text style={styles.workspaceOverviewActionText}>Logout</Text>
+              </Pressable>
+              <Pressable style={styles.workspaceOverviewAction} onPress={() => setActiveTab('billing')}>
+                <Text style={styles.workspaceOverviewActionText}>Manage Subscription</Text>
+              </Pressable>
+            </View>
           </View>
           {billingSummary?.entitlements?.creationBlocked ? (
             <Panel title="Upgrade to keep creating" subtitle="Free plan limit reached">
@@ -1891,9 +1894,20 @@ export default function App() {
           ) : null}
           <View style={[commonStyles.panel, styles.stickyNavWrap]}>
             <Text style={commonStyles.muted}>Navigation</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <View style={styles.navRow}>{NAV_ITEMS.map((item) => <Chip key={item.key} active={activeTab === item.key} label={item.label} onPress={() => setActiveTab(item.key)} />)}</View>
-            </ScrollView>
+            <Pressable style={styles.navigationPrimaryAction} onPress={() => setActiveTab('jobs-new')}>
+              <Text style={styles.navigationPrimaryActionText}>+ New Job</Text>
+            </Pressable>
+            <View style={styles.navRow}>
+              {NAV_ITEMS.map((item) => (
+                <Chip
+                  key={item.key}
+                  active={activeTab === item.key}
+                  label={item.label}
+                  onPress={() => setActiveTab(item.key)}
+                  grow
+                />
+              ))}
+            </View>
           </View>
 
           {activeTab === 'jobs' ? (
@@ -2042,95 +2056,104 @@ export default function App() {
                   Define the labels your business uses and choose the color that appears in the calendar.
                 </Text>
                 {!canManageJobTypes ? (
-                  <Text style={commonStyles.helperText}>
-                    Custom job types and color management unlock on Starter and above.
-                  </Text>
-                ) : null}
-                <FormField
-                  label="Name"
-                  value={jobTypeDraft.name}
-                  onChangeText={(value) => {
-                    setJobTypeDraft((current) => ({ ...current, name: value }))
-                    setJobTypeFormError('')
-                  }}
-                  placeholder="Mulch installation"
-                />
-                <Text style={commonStyles.label}>Color</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                  <View style={styles.colorPresetRow}>
-                    {JOB_TYPE_COLOR_PRESETS.map((color) => {
-                      const active = normalizeJobTypeColor(jobTypeDraft.color) === color
-                      return (
-                        <Pressable
-                          key={color}
-                          style={[styles.colorPreset, { backgroundColor: color }, active ? styles.colorPresetActive : null]}
-                          onPress={() => {
-                            setJobTypeDraft((current) => ({ ...current, color }))
-                            setJobTypeFormError('')
-                          }}
-                          disabled={!canManageJobTypes || jobTypeSaving}
-                        />
-                      )
-                    })}
+                  <View style={styles.jobTypesLockedCard}>
+                    <Text style={commonStyles.errorText}>
+                      Custom job types and color management unlock on Starter and above.
+                    </Text>
+                    <Text style={commonStyles.helperText}>
+                      Purchase the Starter plan or above to create custom job types and colors.
+                    </Text>
+                    {jobTypesError ? <Text style={commonStyles.errorText}>{jobTypesError}</Text> : null}
                   </View>
-                </ScrollView>
-                <TextInput
-                  style={commonStyles.input}
-                  value={jobTypeDraft.color}
-                  onChangeText={(value) => {
-                    setJobTypeDraft((current) => ({ ...current, color: value }))
-                    setJobTypeFormError('')
-                  }}
-                  placeholder="#6d7cff"
-                  placeholderTextColor={colors.textMuted}
-                />
-                <View style={styles.jobTypeActionRow}>
-                  {jobTypeEditingId ? (
-                    <Pressable
-                      style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
-                      onPress={resetJobTypeDraft}
-                      disabled={jobTypeSaving || !canManageJobTypes}
-                    >
-                      <Text style={commonStyles.buttonText}>Cancel edit</Text>
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    style={[commonStyles.button, commonStyles.buttonPrimary, styles.jobTypeActionButton]}
-                    onPress={submitJobTypeDraft}
-                    disabled={jobTypeSaving || !canManageJobTypes}
-                  >
-                    <Text style={commonStyles.buttonText}>{jobTypeSaving ? 'Saving...' : jobTypeEditingId ? 'Save job type' : 'Add job type'}</Text>
-                  </Pressable>
-                </View>
-                {jobTypeFormError ? <Text style={commonStyles.errorText}>{jobTypeFormError}</Text> : null}
-                {jobTypesError ? <Text style={commonStyles.errorText}>{jobTypesError}</Text> : null}
-                {jobTypesLoading ? (
-                  <Text style={commonStyles.text}>Loading job types...</Text>
-                ) : jobTypes.length === 0 ? (
-                  <Text style={commonStyles.text}>No job types yet. Add your first one above.</Text>
                 ) : (
-                  <View style={styles.jobTypeList}>
-                    {jobTypes.map((jobType) => {
-                      const palette = getJobTypeColors(jobType.color || jobType.name, jobTypes)
-                      return (
-                        <View key={jobType.id || jobType.name} style={[styles.jobTypeListItem, { backgroundColor: palette.background, borderColor: palette.border }]}>
-                          <View style={[styles.jobTypeSwatch, { backgroundColor: palette.background }]} />
-                          <View style={styles.jobTypeListContent}>
-                            <Text style={[commonStyles.heading3, { color: palette.text }]}>{jobType.name}</Text>
-                            <Text style={[commonStyles.text, { color: palette.text }]}>{normalizeJobTypeColor(jobType.color) || palette.background}</Text>
-                          </View>
-                          <View style={styles.jobTypeListActions}>
-                            <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => startEditingJobType(jobType)} disabled={!canManageJobTypes}>
-                              <Text style={styles.inlineActionText}>Edit</Text>
-                            </Pressable>
-                            <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => removeJobType(jobType)} disabled={!canManageJobTypes}>
-                              <Text style={styles.inlineActionText}>Delete</Text>
-                            </Pressable>
-                          </View>
-                        </View>
-                      )
-                    })}
-                  </View>
+                  <>
+                    <FormField
+                      label="Name"
+                      value={jobTypeDraft.name}
+                      onChangeText={(value) => {
+                        setJobTypeDraft((current) => ({ ...current, name: value }))
+                        setJobTypeFormError('')
+                      }}
+                      placeholder="Mulch installation"
+                    />
+                    <Text style={commonStyles.label}>Color</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                      <View style={styles.colorPresetRow}>
+                        {JOB_TYPE_COLOR_PRESETS.map((color) => {
+                          const active = normalizeJobTypeColor(jobTypeDraft.color) === color
+                          return (
+                            <Pressable
+                              key={color}
+                              style={[styles.colorPreset, { backgroundColor: color }, active ? styles.colorPresetActive : null]}
+                              onPress={() => {
+                                setJobTypeDraft((current) => ({ ...current, color }))
+                                setJobTypeFormError('')
+                              }}
+                              disabled={jobTypeSaving}
+                            />
+                          )
+                        })}
+                      </View>
+                    </ScrollView>
+                    <TextInput
+                      style={commonStyles.input}
+                      value={jobTypeDraft.color}
+                      onChangeText={(value) => {
+                        setJobTypeDraft((current) => ({ ...current, color: value }))
+                        setJobTypeFormError('')
+                      }}
+                      placeholder="#6d7cff"
+                      placeholderTextColor={colors.textMuted}
+                    />
+                    <View style={styles.jobTypeActionRow}>
+                      {jobTypeEditingId ? (
+                        <Pressable
+                          style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
+                          onPress={resetJobTypeDraft}
+                          disabled={jobTypeSaving}
+                        >
+                          <Text style={commonStyles.buttonText}>Cancel edit</Text>
+                        </Pressable>
+                      ) : null}
+                      <Pressable
+                        style={[commonStyles.button, commonStyles.buttonPrimary, styles.jobTypeActionButton]}
+                        onPress={submitJobTypeDraft}
+                        disabled={jobTypeSaving}
+                      >
+                        <Text style={commonStyles.buttonText}>{jobTypeSaving ? 'Saving...' : jobTypeEditingId ? 'Save job type' : 'Add job type'}</Text>
+                      </Pressable>
+                    </View>
+                    {jobTypeFormError ? <Text style={commonStyles.errorText}>{jobTypeFormError}</Text> : null}
+                    {jobTypesError ? <Text style={commonStyles.errorText}>{jobTypesError}</Text> : null}
+                    {jobTypesLoading ? (
+                      <Text style={commonStyles.text}>Loading job types...</Text>
+                    ) : jobTypes.length === 0 ? (
+                      <Text style={commonStyles.text}>No job types yet. Add your first one above.</Text>
+                    ) : (
+                      <View style={styles.jobTypeList}>
+                        {jobTypes.map((jobType) => {
+                          const palette = getJobTypeColors(jobType.color || jobType.name, jobTypes)
+                          return (
+                            <View key={jobType.id || jobType.name} style={[styles.jobTypeListItem, { backgroundColor: palette.background, borderColor: palette.border }]}>
+                              <View style={[styles.jobTypeSwatch, { backgroundColor: palette.background }]} />
+                              <View style={styles.jobTypeListContent}>
+                                <Text style={[commonStyles.heading3, { color: palette.text }]}>{jobType.name}</Text>
+                                <Text style={[commonStyles.text, { color: palette.text }]}>{normalizeJobTypeColor(jobType.color) || palette.background}</Text>
+                              </View>
+                              <View style={styles.jobTypeListActions}>
+                                <Pressable style={[styles.inlineActionButton, styles.inlineEditButton]} onPress={() => startEditingJobType(jobType)} disabled={jobTypeSaving}>
+                                  <Text style={styles.inlineActionText}>Edit</Text>
+                                </Pressable>
+                                <Pressable style={[styles.inlineActionButton, styles.inlineDeleteButton]} onPress={() => removeJobType(jobType)} disabled={jobTypeSaving}>
+                                  <Text style={styles.inlineActionText}>Delete</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          )
+                        })}
+                      </View>
+                    )}
+                  </>
                 )}
               </Panel>
             </>
@@ -2995,7 +3018,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   workspaceOverview: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
     paddingHorizontal: 16,
@@ -3020,10 +3043,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18
   },
+  workspaceOverviewActions: {
+    width: 156,
+    gap: 8,
+    alignItems: 'stretch'
+  },
   workspaceOverviewAction: {
     minHeight: 36,
     paddingHorizontal: 14,
-    borderRadius: 999,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -3033,12 +3061,35 @@ const styles = StyleSheet.create({
   workspaceOverviewActionText: {
     color: colors.heading,
     fontSize: 12,
-    fontWeight: '800'
+    fontWeight: '800',
+    textAlign: 'center'
   },
   stickyNavWrap: {
     backgroundColor: colors.bg,
     borderColor: colors.border,
-    zIndex: 10
+    zIndex: 10,
+    paddingTop: 20,
+    paddingBottom: 20
+  },
+  navigationPrimaryAction: {
+    minHeight: 46,
+    marginBottom: 8,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.accentStrong,
+    shadowColor: colors.accent,
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4
+  },
+  navigationPrimaryActionText: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: '800'
   },
   screenHero: {
     backgroundColor: colors.panel,
@@ -3130,10 +3181,10 @@ const styles = StyleSheet.create({
     minWidth: 180
   },
   tabs: { flexDirection: 'row', gap: 8 },
-  navRow: { flexDirection: 'row', gap: 10, paddingRight: 8 },
+  navRow: { flexDirection: 'row', gap: 10, width: '100%' },
   chip: {
     minHeight: 44,
-    minWidth: 88,
+    minWidth: 0,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
@@ -3142,11 +3193,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
     borderColor: colors.border,
-    flexShrink: 0
+    flexShrink: 1
   },
   chipActive: { backgroundColor: 'rgba(109, 124, 255, 0.18)', borderColor: colors.borderStrong },
   chipGrow: { flex: 1 },
-  chipText: { color: colors.heading, fontWeight: '700', fontSize: 13 },
+  chipText: { color: colors.heading, fontWeight: '700', fontSize: 13, textAlign: 'center' },
   currencyField: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3460,6 +3511,16 @@ const styles = StyleSheet.create({
   },
   jobTypeActionButton: {
     flex: 1
+  },
+  jobTypesLockedCard: {
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(109, 124, 255, 0.28)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(109, 124, 255, 0.06)'
   },
   jobTypeList: {
     gap: 10,

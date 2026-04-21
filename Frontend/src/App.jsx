@@ -293,30 +293,6 @@ function AppContent() {
               </div>
 
               <div className="page-header-account">
-                {subscriptionSummary ? (
-                  <button
-                    type="button"
-                    className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
-                    onClick={() => navigate('/billing')}
-                  >
-                    <span className="sidebar-section-label">Plan</span>
-                    <strong>{subscriptionSummary.planName}</strong>
-                    <span>{subscriptionSummary.priceLabel}</span>
-                    <span>
-                      Resets {new Date(`${subscriptionSummary.currentPeriodEndsAt}T00:00:00`).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </span>
-                    {subscriptionSummary.usage?.monthlyClientLimit !== null ? (
-                      <span>
-                        {subscriptionSummary.usage.monthlyClientCreations}/{subscriptionSummary.usage.monthlyClientLimit} clients | {subscriptionSummary.usage.monthlyJobCreations}/{subscriptionSummary.usage.monthlyJobLimit} jobs
-                      </span>
-                    ) : (
-                      <span>Unlimited records</span>
-                    )}
-                  </button>
-                ) : null}
                 <p className="sidebar-section-label">Signed in</p>
                 {currentUser ? (
                   <div className="user-menu-container">
@@ -349,6 +325,30 @@ function AppContent() {
                     Return to login
                   </button>
                 )}
+                {subscriptionSummary ? (
+                  <button
+                    type="button"
+                    className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
+                    onClick={() => navigate('/billing')}
+                  >
+                    <span className="sidebar-section-label">Plan</span>
+                    <strong>{subscriptionSummary.planName}</strong>
+                    <span>{subscriptionSummary.priceLabel}</span>
+                    <span>
+                      Resets {new Date(`${subscriptionSummary.currentPeriodEndsAt}T00:00:00`).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                      })}
+                    </span>
+                    {subscriptionSummary.usage?.monthlyClientLimit !== null ? (
+                      <span>
+                        {subscriptionSummary.usage.monthlyClientCreations}/{subscriptionSummary.usage.monthlyClientLimit} clients | {subscriptionSummary.usage.monthlyJobCreations}/{subscriptionSummary.usage.monthlyJobLimit} jobs
+                      </span>
+                    ) : (
+                      <span>Unlimited records</span>
+                    )}
+                  </button>
+                ) : null}
               </div>
             </div>
           </header>

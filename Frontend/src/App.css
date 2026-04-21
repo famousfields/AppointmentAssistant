@@ -1613,7 +1613,7 @@
   text-decoration: none;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1280px) {
   .app-shell {
     grid-template-columns: 1fr;
   }
@@ -1621,6 +1621,33 @@
   .app-sidebar {
     position: static;
     height: auto;
+    width: 100%;
+  }
+
+  .page-header-content {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .page-header-main {
+    justify-items: stretch;
+  }
+
+  .page-header-account {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .page-header-account .sidebar-section-label {
+    align-self: flex-start;
+    text-align: left;
+  }
+
+  .page-header-primary-action,
+  .page-header-plan,
+  .user-menu-container {
+    width: 100%;
+    min-width: 0;
   }
 
   .clients-page {
@@ -2068,6 +2095,7 @@
 
 .job-form-main,
 .job-form-sidebar {
+  min-width: 0;
   display: grid;
   gap: 24px;
 }
@@ -2886,8 +2914,13 @@
   background: transparent;
 }
 
-@media (max-width: 1100px) {
-  .job-form-shell,
+@media (max-width: 1360px) {
+  .job-form-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1024px) {
   .job-work-card__summary,
   .job-command-grid {
     grid-template-columns: 1fr;
@@ -2896,10 +2929,9 @@
   .flow-stepper {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 980px) {
   .job-step-card .form-grid--two,
+  .job-step-card .form-grid--three,
   .job-editor-form .form-grid--two,
   .job-editor-form .form-grid--three {
     grid-template-columns: 1fr;
@@ -2956,6 +2988,16 @@
   .client-suggestions__header,
   .job-day-group__header {
     flex-direction: column;
+  }
+
+  .page-header-account {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .page-header-account .sidebar-section-label {
+    align-self: flex-start;
+    text-align: left;
   }
 
   .guided-input {
