@@ -3,7 +3,74 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
 import { buildClients } from './clientUtils'
 import { formatDisplayDate } from './dateUtils'
+import { getJobStatusMeta } from './statusUtils'
 import useJobTypes from './useJobTypes'
+import {
+  EmptyState,
+  MetricCard,
+  SectionCard,
+  StatusChip
+} from './productUi'
+
+const STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
+
+const formatDate = (dateString) =>
+  formatDisplayDate(dateString, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+
+const formatTimeRange = (timeValue) => {
+  if (!timeValue) return 'Time not set'
+  const [hoursText = '0', minutesText = '00'] = String(timeValue).split(':')
+  const hours = Number(hoursText)
+  const minutes = Number(minutesText)
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return 'Time not set'
+
+  const start = new Date(2000, 0, 1, hours, minutes)
+  const end = new Date(2000, 0, 1, hours + 1, minutes)
+
+  return `${start.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })} - ${end.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`
+}
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(Number(value) || 0)
+
+const sortJobsBySchedule = (jobs) =>
+  [...jobs].sort((first, second) => {
+    const firstDate = new Date(`${first.job_date}T${first.start_time || '23:59:59'}`).getTime()
+    const secondDate = new Date(`${second.job_date}T${second.start_time || '23:59:59'}`).getTime()
+    return firstDate - secondDate
+  })
+
+const groupJobsByDay = (jobs) => {
+  const groups = new Map()
+
+  jobs.forEach((job) => {
+    const dateKey = job.job_date || 'unscheduled'
+    if (!groups.has(dateKey)) {
+      groups.set(dateKey, [])
+    }
+    groups.get(dateKey).push(job)
+  })
+
+  return Array.from(groups.entries()).map(([dateKey, groupedJobs]) => ({
+    dateKey,
+    title: dateKey === 'unscheduled' ? 'No date assigned' : formatDate(dateKey),
+    jobs: groupedJobs
+  }))
+}
 
 export default function JobsList({ currentUser }) {
   const [jobs, setJobs] = useState([])
@@ -13,8 +80,6 @@ export default function JobsList({ currentUser }) {
   const [commentDraft, setCommentDraft] = useState('')
   const [modalError, setModalError] = useState('')
   const [isSavingComments, setIsSavingComments] = useState(false)
-  const [paymentErrors, setPaymentErrors] = useState({})
-  const [savingPayments, setSavingPayments] = useState({})
   const [editingJob, setEditingJob] = useState(null)
   const [isSavingJob, setIsSavingJob] = useState(false)
   const [isDeletingJob, setIsDeletingJob] = useState(false)
@@ -24,13 +89,13 @@ export default function JobsList({ currentUser }) {
 
   const fetchJobs = useCallback(async () => {
     try {
-      const res = await fetchWithAuth('/jobs')
-      if (!res.ok) throw new Error('Failed to fetch jobs')
-      const data = await res.json()
-      setJobs(data)
+      const response = await fetchWithAuth('/jobs')
+      if (!response.ok) throw new Error('Failed to fetch jobs')
+      const data = await response.json()
+      setJobs(sortJobsBySchedule(data))
       setError(null)
-    } catch (err) {
-      console.error('Error fetching jobs:', err)
+    } catch (fetchError) {
+      console.error('Error fetching jobs:', fetchError)
       setError('Failed to load jobs')
     } finally {
       setLoading(false)
@@ -49,7 +114,7 @@ export default function JobsList({ currentUser }) {
 
   const handleStatusChange = async (jobId, newStatus) => {
     try {
-      const res = await fetchWithAuth(`/jobs/${jobId}`, {
+      const response = await fetchWithAuth(`/jobs/${jobId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -57,117 +122,37 @@ export default function JobsList({ currentUser }) {
         body: JSON.stringify({ status: newStatus })
       })
 
-      if (!res.ok) throw new Error('Failed to update status')
+      if (!response.ok) throw new Error('Failed to update status')
 
-      setJobs((prev) => prev.map((job) => (job.id === jobId ? { ...job, status: newStatus } : job)))
-    } catch (err) {
-      console.error('Error updating status:', err)
+      setJobs((prev) =>
+        sortJobsBySchedule(prev.map((job) => (job.id === jobId ? { ...job, status: newStatus } : job)))
+      )
+      setSelectedJob((current) =>
+        current?.id === jobId ? { ...current, status: newStatus } : current
+      )
+    } catch (updateError) {
+      console.error('Error updating status:', updateError)
       alert('Failed to update job status')
     }
   }
 
-  const handlePaymentChange = (jobId, nextValue) => {
-    setJobs((prev) =>
-      prev.map((job) => (job.id === jobId ? { ...job, payment: nextValue } : job))
-    )
-    setPaymentErrors((prev) => ({ ...prev, [jobId]: '' }))
-  }
-
-  const handlePaymentSave = async (jobId, value) => {
-    if (savingPayments[jobId]) return
-
-    const normalizedValue = value === '' ? '0' : String(value)
-
-    if (!/^\d+(\.\d{0,2})?$/.test(normalizedValue)) {
-      setPaymentErrors((prev) => ({ ...prev, [jobId]: 'Use a valid amount with up to 2 decimals' }))
-      return
-    }
-
-    try {
-      setSavingPayments((prev) => ({ ...prev, [jobId]: true }))
-      const numericPayment = Number(normalizedValue)
-      const res = await fetchWithAuth(`/jobs/${jobId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ payment: numericPayment })
-      })
-
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.error || 'Failed to update payment')
-      }
-
-      setJobs((prev) =>
-        prev.map((job) =>
-          job.id === jobId ? { ...job, payment: numericPayment.toFixed(2) } : job
-        )
-      )
-      setPaymentErrors((prev) => ({ ...prev, [jobId]: '' }))
-    } catch (err) {
-      console.error('Error updating payment:', err)
-      setPaymentErrors((prev) => ({ ...prev, [jobId]: err.message || 'Failed to update payment' }))
-    } finally {
-      setSavingPayments((prev) => ({ ...prev, [jobId]: false }))
-    }
-  }
-
-  const handlePaymentKeyDown = async (event, jobId) => {
-    if (event.key !== 'Enter') return
-
-    event.preventDefault()
-    await handlePaymentSave(jobId, event.currentTarget.value)
-  }
-
-  const formatDate = (dateString) =>
-    formatDisplayDate(dateString, {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    })
-
-  const formatTimeRange = (timeValue) => {
-    if (!timeValue) return '-'
-    const [hoursText = '0', minutesText = '00'] = String(timeValue).split(':')
-    const hours = Number(hoursText)
-    const minutes = Number(minutesText)
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return '-'
-
-    const start = new Date(2000, 0, 1, hours, minutes)
-    const end = new Date(2000, 0, 1, hours + 1, minutes)
-
-    return `${start.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit'
-    })} - ${end.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit'
-    })}`
-  }
-
-  const formatCurrency = (value) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(Number(value) || 0)
-
-  const getCommentPreview = (text) => {
-    if (!text) return 'No notes yet'
-    const cleaned = text.replace(/\s+/g, ' ').trim()
-    if (!cleaned) return 'No notes yet'
-    return cleaned.length > 100 ? `${cleaned.slice(0, 100)}...` : cleaned
-  }
-
   const totalPayments = useMemo(
-    () =>
-      jobs.reduce((sum, job) => sum + (Number.parseFloat(job.payment) || 0), 0),
+    () => jobs.reduce((sum, job) => sum + (Number.parseFloat(job.payment) || 0), 0),
     [jobs]
   )
   const clients = useMemo(() => buildClients(jobs), [jobs])
 
-  const openCommentsModal = (job) => {
+  const dashboardMetrics = useMemo(() => {
+    const scheduled = jobs.filter((job) => job.status === 'Pending').length
+    const inProgress = jobs.filter((job) => job.status === 'In Progress').length
+    const completed = jobs.filter((job) => job.status === 'Completed').length
+    const attention = jobs.filter((job) => !job.start_time || !job.address || !job.phone).length
+
+    return { scheduled, inProgress, completed, attention }
+  }, [jobs])
+  const jobsGroupedByDay = useMemo(() => groupJobsByDay(jobs), [jobs])
+
+  const openJobCommandCenter = (job) => {
     setSelectedJob(job)
     setCommentDraft(job.comments || '')
     setModalError('')
@@ -178,7 +163,7 @@ export default function JobsList({ currentUser }) {
     setEditError('')
   }
 
-  const closeCommentsModal = () => {
+  const closeSelectedJob = () => {
     setSelectedJob(null)
     setCommentDraft('')
     setModalError('')
@@ -190,23 +175,35 @@ export default function JobsList({ currentUser }) {
   }
 
   const applyJobUpdate = (jobId, updates) => {
+    const normalizePayment = (value, fallback) =>
+      value !== undefined ? Number(value).toFixed(2) : fallback
+
+    const normalizeComments = (value, fallback) =>
+      value !== undefined ? value || null : fallback
+
     setJobs((prev) =>
-      prev.map((job) => {
-        if (job.id !== jobId) return job
-        return {
-          ...job,
-          ...updates,
-          payment:
-            updates.payment !== undefined
-              ? Number(updates.payment).toFixed(2)
-              : job.payment,
-          comments:
-            updates.comments !== undefined
-              ? updates.comments || null
-              : job.comments
-        }
-      })
+      sortJobsBySchedule(
+        prev.map((job) => {
+          if (job.id !== jobId) return job
+          return {
+            ...job,
+            ...updates,
+            payment: normalizePayment(updates.payment, job.payment),
+            comments: normalizeComments(updates.comments, job.comments)
+          }
+        })
+      )
     )
+
+    setSelectedJob((current) => {
+      if (!current || current.id !== jobId) return current
+      return {
+        ...current,
+        ...updates,
+        payment: normalizePayment(updates.payment, current.payment),
+        comments: normalizeComments(updates.comments, current.comments)
+      }
+    })
   }
 
   const removeJob = (jobId) => {
@@ -221,7 +218,7 @@ export default function JobsList({ currentUser }) {
     setModalError('')
 
     try {
-      const res = await fetchWithAuth(`/jobs/${selectedJob.id}/comments`, {
+      const response = await fetchWithAuth(`/jobs/${selectedJob.id}/comments`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json'
@@ -229,20 +226,16 @@ export default function JobsList({ currentUser }) {
         body: JSON.stringify({ comments: commentDraft })
       })
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
         throw new Error(payload.error || 'Failed to save notes')
       }
 
-      setJobs((prev) =>
-        prev.map((job) =>
-          job.id === selectedJob.id ? { ...job, comments: commentDraft } : job
-        )
-      )
-      closeCommentsModal()
-    } catch (err) {
-      console.error('Error saving comments:', err)
-      setModalError(err.message || 'Unable to save notes')
+      applyJobUpdate(selectedJob.id, { comments: commentDraft })
+      closeSelectedJob()
+    } catch (saveError) {
+      console.error('Error saving comments:', saveError)
+      setModalError(saveError.message || 'Unable to save notes')
     } finally {
       setIsSavingComments(false)
     }
@@ -255,7 +248,7 @@ export default function JobsList({ currentUser }) {
     setEditError('')
 
     try {
-      const res = await fetchWithAuth(`/jobs/${editingJob.id}`, {
+      const response = await fetchWithAuth(`/jobs/${editingJob.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -263,8 +256,8 @@ export default function JobsList({ currentUser }) {
         body: JSON.stringify(updates)
       })
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
         throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to update job')
       }
 
@@ -281,9 +274,9 @@ export default function JobsList({ currentUser }) {
       })
       await refreshJobTypes()
       closeEditModal()
-    } catch (err) {
-      console.error('Error updating job:', err)
-      setEditError(err.message || 'Unable to update job')
+    } catch (saveError) {
+      console.error('Error updating job:', saveError)
+      setEditError(saveError.message || 'Unable to update job')
     } finally {
       setIsSavingJob(false)
     }
@@ -302,19 +295,19 @@ export default function JobsList({ currentUser }) {
     setModalError('')
 
     try {
-      const res = await fetchWithAuth(`/jobs/${job.id}`, {
+      const response = await fetchWithAuth(`/jobs/${job.id}`, {
         method: 'DELETE'
       })
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
         throw new Error(payload.error || payload.errors?.[0]?.msg || 'Failed to delete job')
       }
 
       removeJob(job.id)
-    } catch (err) {
-      console.error('Error deleting job:', err)
-      const message = err.message || 'Unable to delete job'
+    } catch (deleteError) {
+      console.error('Error deleting job:', deleteError)
+      const message = deleteError.message || 'Unable to delete job'
       if (editingJob?.id === job.id) {
         setEditError(message)
       } else {
@@ -353,144 +346,214 @@ export default function JobsList({ currentUser }) {
 
   return (
     <div className="jobs-page">
-      <div className="jobs-toolbar">
-        <div>
-          <h3>All jobs</h3>
-          <p>Track schedules, update statuses, payment amounts, and keep every note attached to the right appointment.</p>
+      <SectionCard
+        eyebrow="Operations Dashboard"
+        title="Today’s jobs and next actions"
+        description="Keep dispatch, field progress, and payment follow-up in one operational view."
+        className="jobs-hero-card"
+      >
+        <div className="metric-card-grid">
+          <MetricCard label="Scheduled" value={dashboardMetrics.scheduled} helper="Ready to dispatch" tone="accent" />
+          <MetricCard label="In progress" value={dashboardMetrics.inProgress} helper="Technician active" />
+          <MetricCard label="Completed" value={dashboardMetrics.completed} helper="Ready for wrap-up" tone="success" />
+          <MetricCard label="Payments tracked" value={formatCurrency(totalPayments)} helper={`${clients.length} clients in workspace`} />
         </div>
-        <div className="jobs-payments-summary">
-          <span className="jobs-payments-summary-label">Total payments</span>
-          <strong>{formatCurrency(totalPayments)}</strong>
+      </SectionCard>
+
+      {dashboardMetrics.attention > 0 ? (
+        <div className="jobs-attention-banner">
+          <strong>{dashboardMetrics.attention} jobs need cleaner dispatch info.</strong>
+          <span>Missing times, phone numbers, or service addresses slow down the office and the field.</span>
         </div>
-      </div>
+      ) : null}
 
       {jobs.length === 0 ? (
-        <div className="jobs-empty-state">
-          <div>
-            <h3>No jobs found</h3>
-            <p>Create your first appointment to start building out the dashboard.</p>
-          </div>
-        </div>
+        <EmptyState
+          title="No jobs yet"
+          description="Create your first work order to start building a schedule, client history, and payment pipeline."
+        />
       ) : (
-        <div className="jobs-table-wrap">
-          <table className="jobs-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Job Type</th>
-                <th>Client</th>
-                <th>Phone</th>
-                <th>Address</th>
-                <th>Status</th>
-                <th>Payment</th>
-                <th>Comments</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr key={job.id}>
-                  <td>{formatDate(job.job_date)}</td>
-                  <td>{formatTimeRange(job.start_time)}</td>
-                  <td>{job.job_type}</td>
-                  <td>{job.name}</td>
-                  <td>{job.phone}</td>
-                  <td>{job.address}</td>
-                  <td>
-                    <select
-                      value={job.status}
-                      onChange={(e) => handleStatusChange(job.id, e.target.value)}
-                      className="jobs-status-select"
-                    >
-                      <option value="Pending">Pending</option>
-                      <option value="In Progress">In Progress</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </td>
-                  <td>
-                    <div className="jobs-payment-cell">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="jobs-payment-input"
-                        value={job.payment ?? ''}
-                        onChange={(e) => handlePaymentChange(job.id, e.target.value)}
-                        onKeyDown={(e) => handlePaymentKeyDown(e, job.id)}
-                        onBlur={(e) => handlePaymentSave(job.id, e.target.value)}
-                        disabled={Boolean(savingPayments[job.id])}
-                      />
-                      {savingPayments[job.id] && (
-                        <p className="jobs-payment-status">Saving...</p>
-                      )}
-                      {paymentErrors[job.id] && (
-                        <p className="jobs-payment-error">{paymentErrors[job.id]}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    <div className="comments-cell">
+        <div className="job-day-group-list">
+          {jobsGroupedByDay.map((group) => (
+            <section key={group.dateKey} className="job-day-group">
+              <div className="job-day-group__header">
+                <div>
+                  <p className="job-day-group__eyebrow">Scheduled day</p>
+                  <h3>{group.title}</h3>
+                </div>
+                <span className="job-day-group__count">
+                  {group.jobs.length} job{group.jobs.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <div className="job-work-list">
+                {group.jobs.map((job) => {
+                  const jobStatus = getJobStatusMeta(job.status)
+
+                  return (
+                    <article key={job.id} className="job-work-card">
+                      <div className="job-work-card__status">
+                        <StatusChip tone={jobStatus.tone}>{jobStatus.label}</StatusChip>
+                      </div>
+
                       <button
                         type="button"
-                        className="comments-button"
-                        onClick={() => openCommentsModal(job)}
-                      >
-                        {job.comments ? 'edit' : 'Add notes'}
-                      </button>
-                      <p className="comments-preview">{getCommentPreview(job.comments)}</p>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="table-actions">
-                      <button
-                        type="button"
-                        className="comments-button"
-                        onClick={() => openEditModal(job)}
-                      >
-                        Edit job
-                      </button>
-                      <button
-                        type="button"
-                        className="comments-button comments-button--danger"
+                        className="job-work-card__delete"
                         onClick={() => deleteJob(job)}
                         disabled={isDeletingJob}
+                        aria-label={`Delete job for ${job.name}`}
                       >
-                        Delete
+                        X
                       </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+                      <div className="job-work-card__header">
+                        <div className="job-work-card__identity">
+                          <p className="job-work-card__eyebrow">Client</p>
+                          <h3>{job.name}</h3>
+                          <p className="job-work-card__subcopy">{job.job_type} at {job.address || 'Address needed'}</p>
+                        </div>
+                      </div>
+
+                      <div className="job-work-card__summary">
+                        <div className="job-work-card__summary-item">
+                          <span>Visit window</span>
+                          <strong>{formatDate(job.job_date)} | {formatTimeRange(job.start_time)}</strong>
+                        </div>
+                        <div className="job-work-card__summary-item job-work-card__summary-item--payment">
+                          <span>Payment</span>
+                          <strong>{formatCurrency(job.payment)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="job-work-card__footer">
+                        <div className="job-work-card__field job-work-card__field--status">
+                          <label>Status</label>
+                          <select
+                            value={job.status}
+                            onChange={(event) => handleStatusChange(job.id, event.target.value)}
+                            className="jobs-status-select"
+                          >
+                            {STATUS_OPTIONS.map((status) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="job-work-card__actions">
+                          <button
+                            type="button"
+                            className="comments-button"
+                            onClick={() => openJobCommandCenter(job)}
+                          >
+                            View details
+                          </button>
+                          <button
+                            type="button"
+                            className="comments-button"
+                            onClick={() => openEditModal(job)}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
 
       {selectedJob && (
-        <div className="comments-modal-backdrop" onClick={closeCommentsModal}>
-          <div className="comments-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="comments-modal-header">
-              <h3>Notes for {selectedJob.name}</h3>
-              <p className="comments-modal-subtitle">
-                {selectedJob.job_type} - {formatDate(selectedJob.job_date)}
-              </p>
+        <div className="comments-modal-backdrop" onClick={closeSelectedJob}>
+          <div className="comments-modal job-command-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="comments-modal-header job-command-modal__header">
+              <div>
+                <p className="section-card__eyebrow">Job Command Center</p>
+                <h3>{selectedJob.name}</h3>
+                <p className="comments-modal-subtitle">
+                  {formatDate(selectedJob.job_date)} | {formatTimeRange(selectedJob.start_time)}
+                </p>
+              </div>
+              {(() => {
+                const jobStatus = getJobStatusMeta(selectedJob.status)
+
+                return <StatusChip tone={jobStatus.tone}>{jobStatus.label}</StatusChip>
+              })()}
             </div>
-            <textarea
-              value={commentDraft}
-              onChange={(e) => setCommentDraft(e.target.value)}
-              placeholder="Add or update notes about this job (500 characters max)"
-            ></textarea>
-            {modalError && <p className="comments-modal-error">{modalError}</p>}
+
+            <div className="job-command-grid">
+              <SectionCard eyebrow="Client" title="Contact" compact>
+                <div className="job-command-list">
+                  <div className="job-command-list__item">
+                    <span>Phone</span>
+                    <strong>{selectedJob.phone || 'Missing phone number'}</strong>
+                  </div>
+                  <div className="job-command-list__item">
+                    <span>Address</span>
+                    <strong>{selectedJob.address || 'Missing address'}</strong>
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard eyebrow="Scope" title="Work order" compact>
+                <div className="job-command-list">
+                  <div className="job-command-list__item">
+                    <span>Job type</span>
+                    <strong>{selectedJob.job_type || 'Not set'}</strong>
+                  </div>
+                  <div className="job-command-list__item">
+                    <span>Payment tracked</span>
+                    <strong>{formatCurrency(selectedJob.payment)}</strong>
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                eyebrow="Notes"
+                title="Dispatch details"
+                description="Keep comments practical enough for the next office handoff or field visit."
+                compact
+                className="job-command-grid__full"
+              >
+                <textarea
+                  value={commentDraft}
+                  onChange={(event) => setCommentDraft(event.target.value)}
+                  placeholder="Add or update notes about this job (500 characters max)"
+                />
+                {modalError && <p className="comments-modal-error">{modalError}</p>}
+              </SectionCard>
+            </div>
+
             <div className="comments-modal-actions">
               <button
                 type="button"
                 className="comments-modal-button comments-modal-button--ghost"
-                onClick={closeCommentsModal}
+                onClick={closeSelectedJob}
                 disabled={isSavingComments}
               >
-                Cancel
+                Close
+              </button>
+              <button
+                type="button"
+                className="comments-modal-button comments-modal-button--ghost"
+                onClick={() => {
+                  openEditModal(selectedJob)
+                  closeSelectedJob()
+                }}
+              >
+                Edit job
+              </button>
+              <button
+                type="button"
+                className="comments-modal-button comments-modal-button--danger"
+                onClick={() => deleteJob(selectedJob)}
+                disabled={isDeletingJob}
+              >
+                {isDeletingJob ? 'Deleting...' : 'Delete job'}
               </button>
               <button
                 type="button"

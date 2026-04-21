@@ -95,71 +95,79 @@ export default function JobTypeManager({
         ) : null}
       </div>
 
-      <form className="job-types-form" onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="job-type-name">Name</label>
-          <input
-            id="job-type-name"
-            type="text"
-            value={draft.name}
-            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Mulch installation"
-            disabled={disabled || saving}
-          />
+      {disabled ? (
+        <div className="job-types-panel__locked">
+          {error ? <p className="form-error">{error}</p> : null}
+          <p className="form-hint">{disabledMessage}</p>
         </div>
-
-        <div className="form-group">
-          <label htmlFor="job-type-color">Color</label>
-          <div className="job-type-color-row">
-            <input
-              id="job-type-color"
-              type="color"
-              value={normalizeJobTypeColor(draft.color) || '#6d7cff'}
-              onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
-              aria-label="Choose job type color"
-              disabled={disabled || saving}
-            />
-            <span className="job-types-color-label">{normalizeJobTypeColor(draft.color) || '#6d7cff'}</span>
-          </div>
-        </div>
-
-        <button type="submit" className="comments-button" disabled={saving || disabled}>
-          {editingId ? 'Save job type' : 'Add job type'}
-        </button>
-
-        {submitError ? <p className="form-error">{submitError}</p> : null}
-        {error ? <p className="form-error">{error}</p> : null}
-        {disabled ? <p className="form-hint">{disabledMessage}</p> : null}
-      </form>
-
-      {loading ? (
-        <p>Loading job types...</p>
-      ) : sortedJobTypes.length === 0 ? (
-        <p>No job types yet. Add your first business-specific category above.</p>
       ) : (
-        <div className="job-types-list">
-          {sortedJobTypes.map((jobType) => {
-            const palette = buildJobTypePalette(jobType.color, jobType.name)
+        <>
+          <form className="job-types-form" onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label htmlFor="job-type-name">Name</label>
+              <input
+                id="job-type-name"
+                type="text"
+                value={draft.name}
+                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Mulch installation"
+                disabled={saving}
+              />
+            </div>
 
-            return (
-              <div key={jobType.id} className="job-types-item" style={{ '--job-bg': palette.background, '--job-border': palette.border, '--job-text': palette.text }}>
-                <span className="job-types-item__swatch" style={{ backgroundColor: palette.background }} />
-                <div className="job-types-item__content">
-                  <strong>{jobType.name}</strong>
-                  <span>{normalizeJobTypeColor(jobType.color)}</span>
-                </div>
-                <div className="job-types-item__actions">
-                  <button type="button" className="comments-button" onClick={() => handleEdit(jobType)} disabled={saving || disabled}>
-                    Edit
-                  </button>
-                  <button type="button" className="comments-button comments-button--danger" onClick={() => handleDelete(jobType)} disabled={saving || disabled}>
-                    Delete
-                  </button>
-                </div>
+            <div className="form-group">
+              <label htmlFor="job-type-color">Color</label>
+              <div className="job-type-color-row">
+                <input
+                  id="job-type-color"
+                  type="color"
+                  value={normalizeJobTypeColor(draft.color) || '#6d7cff'}
+                  onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
+                  aria-label="Choose job type color"
+                  disabled={saving}
+                />
+                <span className="job-types-color-label">{normalizeJobTypeColor(draft.color) || '#6d7cff'}</span>
               </div>
-            )
-          })}
-        </div>
+            </div>
+
+            <button type="submit" className="comments-button" disabled={saving}>
+              {editingId ? 'Save job type' : 'Add job type'}
+            </button>
+
+            {submitError ? <p className="form-error">{submitError}</p> : null}
+            {error ? <p className="form-error">{error}</p> : null}
+          </form>
+
+          {loading ? (
+            <p>Loading job types...</p>
+          ) : sortedJobTypes.length === 0 ? (
+            <p>No job types yet. Add your first business-specific category above.</p>
+          ) : (
+            <div className="job-types-list">
+              {sortedJobTypes.map((jobType) => {
+                const palette = buildJobTypePalette(jobType.color, jobType.name)
+
+                return (
+                  <div key={jobType.id} className="job-types-item" style={{ '--job-bg': palette.background, '--job-border': palette.border, '--job-text': palette.text }}>
+                    <span className="job-types-item__swatch" style={{ backgroundColor: palette.background }} />
+                    <div className="job-types-item__content">
+                      <strong>{jobType.name}</strong>
+                      <span>{normalizeJobTypeColor(jobType.color)}</span>
+                    </div>
+                    <div className="job-types-item__actions">
+                      <button type="button" className="comments-button" onClick={() => handleEdit(jobType)} disabled={saving}>
+                        Edit
+                      </button>
+                      <button type="button" className="comments-button comments-button--danger" onClick={() => handleDelete(jobType)} disabled={saving}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </section>
   )

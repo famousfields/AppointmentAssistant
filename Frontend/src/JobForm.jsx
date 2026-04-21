@@ -4,10 +4,16 @@ import { useNavigate } from 'react-router-dom'
 import useJobTypes from './useJobTypes'
 import { buildJobTypeSuggestionSet } from './jobTypes'
 import ClientSuggestions from './ClientSuggestions'
-import { applyClientSuggestion, buildClients, formatPhonePreview, normalizePhoneDigits } from './clientUtils'
+import {
+  applyClientSuggestion,
+  buildClients,
+  formatPhonePreview,
+  normalizePhoneDigits
+} from './clientUtils'
 import { parseDateValue } from './dateUtils'
 import GoogleMapsLink from './GoogleMapsLink'
 import JobTypeManager from './JobTypeManager'
+import { FlowStepper, SectionCard, StatusChip } from './productUi'
 
 const EMPTY_FORM_DATA = {
   name: '',
@@ -20,10 +26,96 @@ const EMPTY_FORM_DATA = {
   comments: ''
 }
 
+const PHONE_EXAMPLE = '(555) 123-4567'
+
+const FORM_STEPS = [
+  {
+    key: 'client',
+    title: 'Client',
+    description: 'Choose or create the customer record'
+  },
+  {
+    key: 'schedule',
+    title: 'Schedule',
+    description: 'Define the work and lock in the timeslot'
+  },
+  {
+    key: 'review',
+    title: 'Review',
+    description: 'Add notes and create the work order'
+  }
+]
+
 const getDraftStorageKey = (userId) =>
   `appointment-assistant:job-draft:${userId ?? 'guest'}`
 
-const PHONE_EXAMPLE = '(555) 123-4567'
+const formatSchedulePreview = (jobDate, startTime) => {
+  if (!jobDate && !startTime) return 'No visit time selected yet'
+
+  const date = parseDateValue(jobDate)
+  const dateLabel = date
+    ? date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      })
+    : 'Date not set'
+
+  if (!startTime) return `${dateLabel} | Time not set`
+
+  const [hoursText = '0', minutesText = '00'] = String(startTime).split(':')
+  const hours = Number(hoursText)
+  const minutes = Number(minutesText)
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return `${dateLabel} | Time not set`
+
+  const start = new Date(2000, 0, 1, hours, minutes)
+  const end = new Date(2000, 0, 1, hours + 1, minutes)
+
+  return `${dateLabel} | ${start.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })} - ${end.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`
+}
+
+function GuidedField({
+  id,
+  label,
+  hint,
+  error,
+  icon,
+  children,
+  status = 'default'
+}) {
+  return (
+    <div className={`guided-field guided-field--${status}${error ? ' guided-field--error' : ''}`}>
+      <div className="guided-field__header">
+        <label htmlFor={id}>{label}</label>
+        {hint ? <span className="guided-field__hint">{hint}</span> : null}
+      </div>
+      <div className="guided-field__body">
+        {icon ? (
+          <span className="guided-field__icon" aria-hidden="true">
+            {icon}
+          </span>
+        ) : null}
+        {children}
+      </div>
+      {error ? <div className="form-error">{error}</div> : null}
+    </div>
+  )
+}
+
+function ReviewPanel({ label, value, tone = 'default' }) {
+  return (
+    <div className={`review-panel review-panel--${tone}`}>
+      <span className="review-panel__label">{label}</span>
+      <strong className="review-panel__value">{value}</strong>
+    </div>
+  )
+}
 
 export default function JobForm({ currentUser }) {
   const [formData, setFormData] = useState(EMPTY_FORM_DATA)
@@ -31,6 +123,8 @@ export default function JobForm({ currentUser }) {
   const [successMessage, setSuccessMessage] = useState('')
   const [clientJobs, setClientJobs] = useState([])
   const [suggestionField, setSuggestionField] = useState(null)
+  const [currentStep, setCurrentStep] = useState(0)
+  const [selectedClientName, setSelectedClientName] = useState('')
   const navigate = useNavigate()
   const redirectTimer = useRef(null)
   const isInitialMount = useRef(true)
@@ -70,11 +164,10 @@ export default function JobForm({ currentUser }) {
       case 'jobType':
         if (!value || value.trim().length === 0) return 'Job type is required'
         return ''
-      case 'jobDate': {
+      case 'jobDate':
         if (!value) return 'Date is required'
         if (!parseDateValue(value)) return 'Invalid date'
         return ''
-      }
       case 'startTime':
         if (!value) return 'Start time is required'
         if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(value)) return 'Use HH:MM in 24-hour time'
@@ -92,34 +185,91 @@ export default function JobForm({ currentUser }) {
     }
   }
 
-  const handleChange = (e) => {
-    let { name, value } = e.target
-
-    if (name === 'phone') {
-      value = normalizePhoneDigits(value)
-    }
+  const updateField = (name, rawValue, options = {}) => {
+    const value = name === 'phone' ? normalizePhoneDigits(rawValue) : rawValue
 
     setFormData((prev) => ({ ...prev, [name]: value }))
     setErrors((prev) => ({ ...prev, [name]: validateField(name, value) }))
+
+    if (options.suggestionField !== undefined) {
+      setSuggestionField(options.suggestionField)
+    }
+
+    if (['name', 'phone', 'address'].includes(name) && selectedClientName) {
+      setSelectedClientName('')
+    }
+  }
+
+  const validateStep = (stepIndex) => {
+    const fieldsByStep = [
+      ['name', 'phone', 'address'],
+      ['jobType', 'jobDate', 'startTime', 'payment'],
+      ['comments']
+    ]
+
+    const nextErrors = {}
+    fieldsByStep[stepIndex].forEach((field) => {
+      const error = validateField(field, formData[field])
+      if (error) nextErrors[field] = error
+    })
+
+    setErrors((prev) => ({ ...prev, ...nextErrors }))
+    return Object.keys(nextErrors).length === 0
   }
 
   const validateAll = () => {
-    const newErrors = {}
+    const nextErrors = {}
     Object.keys(formData).forEach((key) => {
       const error = validateField(key, formData[key])
-      if (error) newErrors[key] = error
+      if (error) nextErrors[key] = error
     })
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
+    setErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleNextStep = () => {
+    if (!validateStep(currentStep)) return
+    setCurrentStep((prev) => Math.min(prev + 1, FORM_STEPS.length - 1))
+  }
+
+  const handleStepSelect = (stepIndex) => {
+    if (stepIndex <= currentStep) {
+      setCurrentStep(stepIndex)
+      return
+    }
+
+    if (validateStep(currentStep)) {
+      setCurrentStep(stepIndex)
+    }
+  }
+
+  const applyExistingClient = (client) => {
+    setFormData((prev) => ({
+      ...prev,
+      ...applyClientSuggestion(client)
+    }))
+    setErrors((prev) => ({
+      ...prev,
+      name: '',
+      phone: '',
+      address: ''
+    }))
+    setSuggestionField(null)
+    setSelectedClientName(client.name || 'Existing client')
+  }
+
+  const dismissSuggestionsAsNewClient = () => {
+    setSuggestionField(null)
+    setSelectedClientName('')
+  }
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
     if (!validateAll()) return
     setSuccessMessage('')
 
     try {
-      const res = await fetchWithAuth('/jobs', {
+      const response = await fetchWithAuth('/jobs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -130,17 +280,19 @@ export default function JobForm({ currentUser }) {
         })
       })
 
-      const data = await res.json()
-      if (res.ok) {
+      const data = await response.json()
+      if (response.ok) {
         window.localStorage.removeItem(getDraftStorageKey(currentUser?.id))
         setErrors((prev) => ({ ...prev, submit: '' }))
-        setSuccessMessage('Job created! Redirecting to Jobs...')
+        setSuccessMessage('Job created! Redirecting to Calendar...')
         setFormData(EMPTY_FORM_DATA)
         setSuggestionField(null)
+        setCurrentStep(0)
+        setSelectedClientName('')
         await refreshJobTypes()
         await refreshSubscription()
         redirectTimer.current = setTimeout(() => {
-          navigate('/jobs')
+          navigate('/calendar')
         }, 1000)
       } else {
         const errorMessage =
@@ -149,14 +301,12 @@ export default function JobForm({ currentUser }) {
         setSuccessMessage('')
         await refreshSubscription()
       }
-    } catch (err) {
-      console.error('Network error:', err)
+    } catch (error) {
+      console.error('Network error:', error)
       setErrors((prev) => ({ ...prev, submit: 'Network error. Check backend.' }))
       setSuccessMessage('')
     }
   }
-
-  const hasErrors = Object.values(errors).some(Boolean)
 
   useEffect(() => {
     if (!currentUser) {
@@ -168,12 +318,12 @@ export default function JobForm({ currentUser }) {
 
     const loadClients = async () => {
       try {
-        const res = await fetchWithAuth('/jobs')
-        if (!res.ok) throw new Error('Unable to load client suggestions')
-        const data = await res.json()
+        const response = await fetchWithAuth('/jobs')
+        if (!response.ok) throw new Error('Unable to load client suggestions')
+        const data = await response.json()
         if (active) setClientJobs(Array.isArray(data) ? data : [])
-      } catch (err) {
-        console.error('Failed loading client suggestions:', err)
+      } catch (error) {
+        console.error('Failed loading client suggestions:', error)
         if (active) setClientJobs([])
       }
     }
@@ -203,8 +353,8 @@ export default function JobForm({ currentUser }) {
         ...EMPTY_FORM_DATA,
         ...parsedDraft
       })
-    } catch (err) {
-      console.error('Failed to parse saved job draft:', err)
+    } catch (error) {
+      console.error('Failed to parse saved job draft:', error)
       window.localStorage.removeItem(getDraftStorageKey(currentUser?.id))
       setFormData(EMPTY_FORM_DATA)
     }
@@ -216,8 +366,6 @@ export default function JobForm({ currentUser }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    
-    // Skip saving on initial mount to avoid wiping the loaded draft
     if (isInitialMount.current) return
 
     const hasDraftContent = Object.values(formData).some((value) =>
@@ -235,280 +383,407 @@ export default function JobForm({ currentUser }) {
     )
   }, [formData, currentUser?.id])
 
-  useEffect(() => {
-    return () => {
-      if (redirectTimer.current) {
-        clearTimeout(redirectTimer.current)
-      }
+  useEffect(() => () => {
+    if (redirectTimer.current) {
+      clearTimeout(redirectTimer.current)
     }
   }, [])
 
+  const hasErrors = Object.values(errors).some(Boolean)
+  const clientLabel = formData.name || selectedClientName || 'New client'
+  const scheduleLabel = formatSchedulePreview(formData.jobDate, formData.startTime)
+  const paymentLabel = formData.payment ? `$${Number(formData.payment).toFixed(2)}` : 'Not priced yet'
+  const noteSummary = formData.comments.trim() ? `${formData.comments.trim().length}/500 chars` : 'No internal notes yet'
+  const stepDescriptions = [
+    selectedClientName ? `Using ${selectedClientName}` : 'Start by selecting or creating the client record.',
+    scheduleLabel,
+    creationBlocked ? 'Billing limit reached for this workspace.' : 'Review the job before you create it.'
+  ]
+
   return (
     <div className="job-form-layout">
-      <JobTypeManager
-        jobTypes={jobTypes}
-        loading={jobTypesLoading}
-        error={jobTypePanelError}
-        disabled={!currentUser || !canManageJobTypes}
-        disabledMessage={
-          !currentUser
-            ? 'Log in to manage job types.'
-            : 'Upgrade to Starter or above to create custom job types and colors.'
-        }
-        onCreate={createJobType}
-        onUpdate={updateJobType}
-        onDelete={deleteJobType}
-      />
+      <div className="job-form-shell">
+        <div className="job-form-main">
+          <SectionCard
+            eyebrow="New Work Order"
+            title="Create a job your team can act on immediately"
+            description="This flow guides the office from customer details to a scheduled, ready-to-dispatch work order."
+            action={currentUser ? <StatusChip tone="scheduled">Primary workflow</StatusChip> : null}
+            className="job-form-hero job-form-hero--guided"
+          >
+            {currentUser && subscriptionSummary ? (
+              <div className={`subscription-notice${creationBlocked ? ' subscription-notice--alert' : ''}`}>
+                <div>
+                  <strong>{subscriptionSummary.planName} plan</strong>
+                  <p>
+                    {subscriptionSummary.usage.monthlyClientLimit === null
+                      ? 'Unlimited clients and jobs are active for this workspace.'
+                      : `${subscriptionSummary.usage.monthlyClientCreations}/${subscriptionSummary.usage.monthlyClientLimit} clients and ${subscriptionSummary.usage.monthlyJobCreations}/${subscriptionSummary.usage.monthlyJobLimit} jobs used this month.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="comments-button comments-button--ghost"
+                  onClick={() => navigate('/billing')}
+                >
+                  View billing
+                </button>
+              </div>
+            ) : null}
 
-      <form onSubmit={handleSubmit} noValidate className="job-form">
-        <div>
-          <h3>Appointment details</h3>
-          <p className="login-subtitle">
-            Capture the client info, scheduled date, and any notes your team should see before the visit.
-          </p>
+            {!currentUser ? (
+              <div className="form-error-message">
+                Please log in before creating a job.
+              </div>
+            ) : null}
+          </SectionCard>
+
+          <form onSubmit={handleSubmit} noValidate className="job-form job-form--workflow">
+            <SectionCard compact className="job-flow-shell">
+              <FlowStepper
+                steps={FORM_STEPS.map((step, index) => ({
+                  ...step,
+                  description: stepDescriptions[index]
+                }))}
+                currentStep={currentStep}
+                onStepSelect={handleStepSelect}
+              />
+
+              <div className="job-step-stage">
+                <section className={`job-step-panel${currentStep === 0 ? ' job-step-panel--active' : ''}`}>
+                  <SectionCard
+                    eyebrow="Step 1"
+                    title="Client Info"
+                    description="Confirm who the work is for before the office commits the visit."
+                    compact
+                    className="job-step-card"
+                  >
+                    {selectedClientName ? (
+                      <div className="selection-banner">
+                        <span className="selection-banner__label">Existing client selected</span>
+                        <strong>{selectedClientName}</strong>
+                      </div>
+                    ) : null}
+
+                    <div className="form-grid form-grid--two">
+                      <GuidedField
+                        id="name"
+                        label="Client name"
+                        hint="Search or create"
+                        icon="CL"
+                        error={errors.name}
+                        status={selectedClientName ? 'selected' : 'default'}
+                      >
+                        <input
+                          id="name"
+                          name="name"
+                          type="text"
+                          autoComplete="name"
+                          required
+                          className="guided-input"
+                          onChange={(event) => updateField('name', event.target.value, { suggestionField: 'name' })}
+                          value={formData.name}
+                          placeholder="Jane Smith"
+                        />
+                      </GuidedField>
+
+                      <GuidedField
+                        id="phone"
+                        label="Phone"
+                        hint={`Preview ${formatPhonePreview(formData.phone)}`}
+                        icon="PH"
+                        error={errors.phone}
+                      >
+                        <input
+                          id="phone"
+                          name="phone"
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          autoComplete="tel"
+                          required
+                          className="guided-input"
+                          onChange={(event) => updateField('phone', event.target.value, { suggestionField: 'phone' })}
+                          value={formData.phone}
+                          maxLength={15}
+                          placeholder={PHONE_EXAMPLE}
+                        />
+                      </GuidedField>
+                    </div>
+
+                    <ClientSuggestions
+                      clients={clients}
+                      query={suggestionField === 'phone' ? formData.phone : formData.name}
+                      field={suggestionField === 'phone' ? 'phone' : 'name'}
+                      visible={suggestionField === 'name' || suggestionField === 'phone'}
+                      onSelect={applyExistingClient}
+                      onCreateNew={dismissSuggestionsAsNewClient}
+                      createLabel={`Create new client${formData.name ? `: ${formData.name}` : ''}`}
+                    />
+
+                    <GuidedField
+                      id="address"
+                      label="Service address"
+                      hint="Route-ready"
+                      icon="AD"
+                      error={errors.address}
+                    >
+                      <input
+                        id="address"
+                        name="address"
+                        type="text"
+                        autoComplete="street-address"
+                        required
+                        className="guided-input"
+                        onChange={(event) => updateField('address', event.target.value, { suggestionField: 'address' })}
+                        value={formData.address}
+                        placeholder="123 Main St, Springfield, IL 62704"
+                      />
+                    </GuidedField>
+
+                    <div className="form-inline-actions">
+                      <GoogleMapsLink address={formData.address} />
+                      <span className="form-hint">
+                        Include street, city, and unit details so the crew can find the visit quickly.
+                      </span>
+                    </div>
+
+                    <ClientSuggestions
+                      clients={clients}
+                      query={formData.address}
+                      field="address"
+                      visible={suggestionField === 'address'}
+                      onSelect={applyExistingClient}
+                      onCreateNew={dismissSuggestionsAsNewClient}
+                      createLabel="Use this as a new address"
+                    />
+                  </SectionCard>
+                </section>
+
+                <section className={`job-step-panel${currentStep === 1 ? ' job-step-panel--active' : ''}`}>
+                  <SectionCard
+                    eyebrow="Step 2"
+                    title="Job Details And Scheduling"
+                    description="Define the scope, then give dispatch a clear arrival window."
+                    compact
+                    className="job-step-card"
+                  >
+                    <div className="form-grid form-grid--two">
+                      <GuidedField
+                        id="jobType"
+                        label="Job type"
+                        hint="Business label"
+                        icon="JT"
+                        error={errors.jobType}
+                      >
+                        <input
+                          id="jobType"
+                          name="jobType"
+                          type="text"
+                          list="job-type-options"
+                          required
+                          className="guided-input"
+                          onChange={(event) => updateField('jobType', event.target.value, { suggestionField: null })}
+                          value={formData.jobType}
+                          placeholder="Mulch installation"
+                        />
+                        <datalist id="job-type-options">
+                          {jobTypeSuggestions.map((jobType) => (
+                            <option key={jobType} value={jobType} />
+                          ))}
+                        </datalist>
+                      </GuidedField>
+
+                      <GuidedField
+                        id="payment"
+                        label="Quoted amount"
+                        hint="Optional now"
+                        icon="$"
+                        error={errors.payment}
+                      >
+                        <input
+                          id="payment"
+                          name="payment"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          className="guided-input"
+                          onChange={(event) => updateField('payment', event.target.value, { suggestionField: null })}
+                          value={formData.payment}
+                          placeholder="0.00"
+                        />
+                      </GuidedField>
+
+                      <GuidedField
+                        id="jobDate"
+                        label="Date"
+                        hint="Required"
+                        icon="DT"
+                        error={errors.jobDate}
+                      >
+                        <input
+                          id="jobDate"
+                          name="jobDate"
+                          type="date"
+                          required
+                          className="guided-input"
+                          onChange={(event) => updateField('jobDate', event.target.value, { suggestionField: null })}
+                          value={formData.jobDate}
+                        />
+                      </GuidedField>
+
+                      <GuidedField
+                        id="startTime"
+                        label="Start time"
+                        hint="One-hour slot"
+                        icon="TM"
+                        error={errors.startTime}
+                      >
+                        <input
+                          id="startTime"
+                          name="startTime"
+                          type="time"
+                          required
+                          className="guided-input"
+                          onChange={(event) => updateField('startTime', event.target.value, { suggestionField: null })}
+                          value={formData.startTime}
+                        />
+                      </GuidedField>
+                    </div>
+
+                    <div className="schedule-preview-banner">
+                      <span className="schedule-preview-banner__label">Dispatch preview</span>
+                      <strong>{scheduleLabel}</strong>
+                      <span>The calendar will reserve a one-hour timeslot starting here.</span>
+                    </div>
+                  </SectionCard>
+                </section>
+
+                <section className={`job-step-panel${currentStep === 2 ? ' job-step-panel--active' : ''}`}>
+                  <SectionCard
+                    eyebrow="Step 3"
+                    title="Review And Create"
+                    description="Capture internal notes, sanity-check the job, and create it with one clear action."
+                    compact
+                    className="job-step-card"
+                  >
+                    <GuidedField
+                      id="comments"
+                      label="Dispatch notes"
+                      hint={`${formData.comments.length}/500`}
+                      icon="NT"
+                      error={errors.comments}
+                    >
+                      <textarea
+                        id="comments"
+                        name="comments"
+                        className="guided-input guided-input--textarea"
+                        onChange={(event) => updateField('comments', event.target.value, { suggestionField: null })}
+                        value={formData.comments}
+                        placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
+                      />
+                    </GuidedField>
+
+                    <div className="review-grid">
+                      <ReviewPanel label="Client" value={clientLabel} />
+                      <ReviewPanel label="Visit" value={scheduleLabel} tone="accent" />
+                      <ReviewPanel label="Scope" value={formData.jobType || 'Job type not set yet'} />
+                      <ReviewPanel label="Revenue" value={paymentLabel} tone="success" />
+                      <ReviewPanel label="Notes" value={noteSummary} />
+                    </div>
+
+                    <div className="cta-review-panel">
+                      <div className="cta-review-panel__copy">
+                        <span className="cta-review-panel__eyebrow">Primary Action</span>
+                        <h4>Create Job</h4>
+                        <p>
+                          {creationBlocked
+                            ? 'Upgrade or wait for your usage reset to create another job.'
+                            : 'This creates the work order instantly and makes it available across jobs, clients, and calendar.'}
+                        </p>
+                      </div>
+
+                      {errors.submit && <div className="form-error-message">{errors.submit}</div>}
+                      {successMessage && <div className="form-success-message">{successMessage}</div>}
+
+                      <button
+                        type="submit"
+                        disabled={hasErrors || !currentUser || creationBlocked}
+                        className="form-submit-button form-submit-button--hero"
+                      >
+                        {creationBlocked ? 'Upgrade or wait for reset' : 'Create Job'}
+                      </button>
+                    </div>
+                  </SectionCard>
+                </section>
+              </div>
+
+              <div className="step-actions">
+                <button
+                  type="button"
+                  className="comments-modal-button comments-modal-button--ghost step-actions__button"
+                  onClick={() => setCurrentStep((prev) => Math.max(prev - 1, 0))}
+                  disabled={currentStep === 0}
+                >
+                  Back
+                </button>
+
+                {currentStep < FORM_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    className="comments-modal-button comments-modal-button--primary step-actions__button"
+                    onClick={handleNextStep}
+                  >
+                    Continue to {FORM_STEPS[currentStep + 1].title}
+                  </button>
+                ) : (
+                  <span className="step-actions__completion">Ready to create</span>
+                )}
+              </div>
+            </SectionCard>
+          </form>
         </div>
 
-        {!currentUser && (
-          <div className="form-error-message">
-            Please log in before creating a job.
-          </div>
-        )}
+        <aside className="job-form-sidebar">
+          <SectionCard
+            eyebrow="Live Summary"
+            title={clientLabel}
+            description="A quick read on what your team will see as you build the job."
+            className="job-form-sidebar-card"
+          >
+            <div className="job-preview-stack">
+              <div className="job-preview-card">
+                <span className="job-preview-card__label">Selected Client</span>
+                <strong>{selectedClientName || 'New client entry'}</strong>
+              </div>
+              <div className="job-preview-card">
+                <span className="job-preview-card__label">Visit Window</span>
+                <strong>{scheduleLabel}</strong>
+              </div>
+              <div className="job-preview-card">
+                <span className="job-preview-card__label">Billing Readiness</span>
+                <strong>{paymentLabel}</strong>
+              </div>
+            </div>
+          </SectionCard>
 
-        {currentUser && subscriptionSummary && (
-          <div className={`subscription-notice${creationBlocked ? ' subscription-notice--alert' : ''}`}>
-            <strong>{subscriptionSummary.planName} plan</strong>
-            <span>
-              {subscriptionSummary.usage.monthlyClientLimit === null
-                ? 'Unlimited clients and jobs are active for this workspace.'
-                : `${subscriptionSummary.usage.monthlyClientCreations}/${subscriptionSummary.usage.monthlyClientLimit} clients and ${subscriptionSummary.usage.monthlyJobCreations}/${subscriptionSummary.usage.monthlyJobLimit} jobs used this month.`}
-            </span>
-            <button type="button" className="comments-button comments-button--ghost" onClick={() => navigate('/billing')}>
-              View billing
-            </button>
-          </div>
-        )}
-
-        <div className="form-group">
-          <label htmlFor="name">Client name</label>
-          <input
-            id="name"
-            name="name"
-            type="text"
-            autoComplete="name"
-            required
-            onChange={(e) => {
-              handleChange(e)
-              setSuggestionField('name')
-            }}
-            value={formData.name}
-            placeholder="Jane Smith"
+          <JobTypeManager
+            jobTypes={jobTypes}
+            loading={jobTypesLoading}
+            error={jobTypePanelError}
+            disabled={!currentUser || !canManageJobTypes}
+            disabledMessage={
+              !currentUser
+                ? 'Log in to manage job types.'
+                : 'Purchase the Starter plan or above to create custom job types and colors.'
+            }
+            onCreate={createJobType}
+            onUpdate={updateJobType}
+            onDelete={deleteJobType}
           />
-          {errors.name && <div className="form-error">{errors.name}</div>}
-        </div>
-        <ClientSuggestions
-          clients={clients}
-          query={formData.name}
-          field="name"
-          visible={suggestionField === 'name'}
-          onSelect={(client) => {
-            setFormData((prev) => ({
-              ...prev,
-              ...applyClientSuggestion(client)
-            }))
-            setErrors((prev) => ({
-              ...prev,
-              name: '',
-              phone: '',
-              address: ''
-            }))
-            setSuggestionField(null)
-          }}
-        />
-
-      <div className="form-group">
-        <label htmlFor="phone">Phone</label>
-        <input
-          id="phone"
-          name="phone"
-          type="tel"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          autoComplete="tel"
-          required
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField('phone')
-          }}
-          value={formData.phone}
-          maxLength={15}
-          placeholder={PHONE_EXAMPLE}
-        />
-        <div className="form-hint">Enter digits only. Preview: {formatPhonePreview(formData.phone)}</div>
-        {errors.phone && <div className="form-error">{errors.phone}</div>}
+        </aside>
       </div>
-      <ClientSuggestions
-        clients={clients}
-        query={formData.phone}
-        field="phone"
-        visible={suggestionField === 'phone'}
-        onSelect={(client) => {
-          setFormData((prev) => ({
-            ...prev,
-            ...applyClientSuggestion(client)
-          }))
-          setErrors((prev) => ({
-            ...prev,
-            name: '',
-            phone: '',
-            address: ''
-          }))
-          setSuggestionField(null)
-        }}
-      />
-
-      <div className="form-group">
-        <label htmlFor="address">Address</label>
-        <input
-          id="address"
-          name="address"
-          type="text"
-          autoComplete="street-address"
-          required
-          onChange={(e) => {
-            handleChange(e)
-            setSuggestionField('address')
-          }}
-          value={formData.address}
-          placeholder="123 Main St, Springfield, IL 62704"
-        />
-        <GoogleMapsLink address={formData.address} />
-        <div className="form-hint">Include street, city, and any unit details so the crew can find the appointment quickly.</div>
-        {errors.address && <div className="form-error">{errors.address}</div>}
-      </div>
-      <ClientSuggestions
-        clients={clients}
-        query={formData.address}
-        field="address"
-        visible={suggestionField === 'address'}
-        onSelect={(client) => {
-          setFormData((prev) => ({
-            ...prev,
-            ...applyClientSuggestion(client)
-          }))
-          setErrors((prev) => ({
-            ...prev,
-            name: '',
-            phone: '',
-            address: ''
-          }))
-          setSuggestionField(null)
-        }}
-      />
-
-        <div className="form-group">
-          <label htmlFor="jobType">Job type</label>
-          <input
-            id="jobType"
-            name="jobType"
-            type="text"
-            list="job-type-options"
-            required
-            onChange={(e) => {
-              handleChange(e)
-              setSuggestionField(null)
-            }}
-            value={formData.jobType}
-            placeholder="Mulch installation"
-          />
-          <datalist id="job-type-options">
-            {jobTypeSuggestions.map((jobType) => (
-              <option key={jobType} value={jobType} />
-            ))}
-          </datalist>
-          <div className="form-hint">Type a business-specific job label. Save the color in the Job Types panel so the calendar stays easy to scan.</div>
-          {errors.jobType && <div className="form-error">{errors.jobType}</div>}
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="jobDate">Date</label>
-          <input
-            id="jobDate"
-            name="jobDate"
-            type="date"
-            required
-            onChange={(e) => {
-              handleChange(e)
-              setSuggestionField(null)
-            }}
-            value={formData.jobDate}
-            placeholder="YYYY-MM-DD"
-          />
-          {errors.jobDate && <div className="form-error">{errors.jobDate}</div>}
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="startTime">Start time</label>
-          <input
-            id="startTime"
-            name="startTime"
-            type="time"
-            required
-            onChange={(e) => {
-              handleChange(e)
-              setSuggestionField(null)
-            }}
-            value={formData.startTime}
-          />
-          <div className="form-hint">Each job reserves a one-hour timeslot starting at this time.</div>
-          {errors.startTime && <div className="form-error">{errors.startTime}</div>}
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="payment">Payment</label>
-          <input
-            id="payment"
-            name="payment"
-            type="number"
-            min="0"
-            step="0.01"
-            inputMode="decimal"
-            onChange={(e) => {
-              handleChange(e)
-              setSuggestionField(null)
-            }}
-            value={formData.payment}
-            placeholder="0.00"
-          />
-          {errors.payment && <div className="form-error">{errors.payment}</div>}
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="comments">Comments</label>
-          <textarea
-            id="comments"
-            name="comments"
-            onChange={(e) => {
-              handleChange(e)
-              setSuggestionField(null)
-            }}
-            value={formData.comments}
-            placeholder="Gate code 2468. Park in driveway. Customer prefers afternoon arrival."
-          ></textarea>
-          <div className="form-hint">Add gate codes, parking notes, scope details, or anything the team should know before arrival.</div>
-          {errors.comments && <div className="form-error">{errors.comments}</div>}
-        </div>
-
-        {errors.submit && <div className="form-error-message">{errors.submit}</div>}
-        {successMessage && <div className="form-success-message">{successMessage}</div>}
-
-        <button
-          type="submit"
-          disabled={hasErrors || !currentUser || creationBlocked}
-          className="form-submit-button"
-        >
-          {creationBlocked ? 'Upgrade or wait for reset' : 'Save appointment'}
-        </button>
-      </form>
     </div>
   )
 }

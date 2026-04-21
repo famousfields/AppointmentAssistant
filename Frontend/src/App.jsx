@@ -15,7 +15,6 @@ const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 
 const NAV_ITEMS = [
   { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
-  { label: 'New Job', path: '/jobs/new', description: 'Capture a new appointment request.' },
   { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
   { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' },
   { label: 'Billing', path: '/billing', description: 'Check plan limits, reset dates, and upgrades.' }
@@ -98,6 +97,7 @@ function AppContent() {
   }, [])
 
   const currentUser = session?.user ?? null
+  const showWorkspaceNewJobAction = currentUser && location.pathname !== '/jobs/new'
 
   const refreshAccessToken = useCallback(async () => {
     try {
@@ -252,11 +252,6 @@ function AppContent() {
                 </div>
               </div>
 
-          <button type="button" className="sidebar-primary-action" onClick={() => navigate('/jobs/new')}>
-            <span className="sidebar-primary-action-icon">+</span>
-            New Job
-          </button>
-
           <nav className="sidebar-nav" aria-label="Primary navigation">
             {NAV_ITEMS.map((item) => (
               <NavLink
@@ -281,37 +276,23 @@ function AppContent() {
         {!isLogin && (
           <header className="page-header">
             <div className="page-header-content">
-              <div>
+              <div className="page-header-main">
                 <p className="page-header-kicker">Workspace overview</p>
                 <h2>{pageMeta.title}</h2>
                 <p className="page-header-description">{pageMeta.description}</p>
+                {showWorkspaceNewJobAction ? (
+                  <button
+                    type="button"
+                    className="sidebar-primary-action page-header-primary-action"
+                    onClick={() => navigate('/jobs/new')}
+                  >
+                    <span className="sidebar-primary-action-icon">+</span>
+                    New Job
+                  </button>
+                ) : null}
               </div>
 
               <div className="page-header-account">
-                {subscriptionSummary ? (
-                  <button
-                    type="button"
-                    className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
-                    onClick={() => navigate('/billing')}
-                  >
-                    <span className="sidebar-section-label">Plan</span>
-                    <strong>{subscriptionSummary.planName}</strong>
-                    <span>{subscriptionSummary.priceLabel}</span>
-                    <span>
-                      Resets {new Date(`${subscriptionSummary.currentPeriodEndsAt}T00:00:00`).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </span>
-                    {subscriptionSummary.usage?.monthlyClientLimit !== null ? (
-                      <span>
-                        {subscriptionSummary.usage.monthlyClientCreations}/{subscriptionSummary.usage.monthlyClientLimit} clients | {subscriptionSummary.usage.monthlyJobCreations}/{subscriptionSummary.usage.monthlyJobLimit} jobs
-                      </span>
-                    ) : (
-                      <span>Unlimited records</span>
-                    )}
-                  </button>
-                ) : null}
                 <p className="sidebar-section-label">Signed in</p>
                 {currentUser ? (
                   <div className="user-menu-container">
@@ -344,6 +325,30 @@ function AppContent() {
                     Return to login
                   </button>
                 )}
+                {subscriptionSummary ? (
+                  <button
+                    type="button"
+                    className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
+                    onClick={() => navigate('/billing')}
+                  >
+                    <span className="sidebar-section-label">Plan</span>
+                    <strong>{subscriptionSummary.planName}</strong>
+                    <span>{subscriptionSummary.priceLabel}</span>
+                    <span>
+                      Resets {new Date(`${subscriptionSummary.currentPeriodEndsAt}T00:00:00`).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                      })}
+                    </span>
+                    {subscriptionSummary.usage?.monthlyClientLimit !== null ? (
+                      <span>
+                        {subscriptionSummary.usage.monthlyClientCreations}/{subscriptionSummary.usage.monthlyClientLimit} clients | {subscriptionSummary.usage.monthlyJobCreations}/{subscriptionSummary.usage.monthlyJobLimit} jobs
+                      </span>
+                    ) : (
+                      <span>Unlimited records</span>
+                    )}
+                  </button>
+                ) : null}
               </div>
             </div>
           </header>
