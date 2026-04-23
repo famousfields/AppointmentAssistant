@@ -189,48 +189,6 @@ export default function LandingScreen({ currentUser }) {
         </div>
       </section>
 
-      <section className="landing-section landing-section--gallery">
-        <div className="landing-section__header">
-          <p className="sidebar-eyebrow">Product previews</p>
-          <h2>Show prospects what the workflow actually feels like</h2>
-          <p>
-            This section is ready for polished screenshots now, and it is also structured so you can swap in real captures from the app later without redesigning the page.
-          </p>
-        </div>
-        <div className="landing-gallery-grid">
-          <article className="landing-gallery-card">
-            <div className="landing-gallery-card__frame landing-gallery-card__frame--calendar">
-              <div className="landing-gallery-card__panel">
-                <span className="landing-gallery-card__tag">Calendar</span>
-                <strong>Daily scheduling with revenue visibility</strong>
-              </div>
-            </div>
-            <h3>Daily calendar</h3>
-            <p>Highlight the day view, scheduled appointments, and gross revenue totals to show why dispatch gets easier.</p>
-          </article>
-          <article className="landing-gallery-card">
-            <div className="landing-gallery-card__frame landing-gallery-card__frame--clients">
-              <div className="landing-gallery-card__panel">
-                <span className="landing-gallery-card__tag">Clients</span>
-                <strong>Customer history, contact details, and linked jobs</strong>
-              </div>
-            </div>
-            <h3>Client records</h3>
-            <p>Use this slot for a screenshot of the client page so new users can see that every job stays tied to the right customer.</p>
-          </article>
-          <article className="landing-gallery-card">
-            <div className="landing-gallery-card__frame landing-gallery-card__frame--mobile">
-              <div className="landing-gallery-card__panel">
-                <span className="landing-gallery-card__tag">Mobile</span>
-                <strong>Create jobs and review the day from the field</strong>
-              </div>
-            </div>
-            <h3>Mobile scheduling</h3>
-            <p>Reserve this space for your Google Play screenshots once the listing is live so visitors can preview the Android app before downloading.</p>
-          </article>
-        </div>
-      </section>
-
       <section className="landing-section">
         <div className="landing-section__header">
           <p className="sidebar-eyebrow">How it works</p>
