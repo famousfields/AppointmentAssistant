@@ -1,9 +1,10 @@
 import { StatusBar } from 'expo-status-bar'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   Linking,
   KeyboardAvoidingView,
   Modal,
@@ -48,6 +49,9 @@ const CALENDAR_VIEWS = [
   { key: 'year', label: 'Yearly' }
 ]
 const PHONE_EXAMPLE = '(555) 123-4567'
+const KEYBOARD_SCROLL_DELAY_MS = Platform.OS === 'ios' ? 80 : 140
+const AUTH_KEYBOARD_EXTRA_OFFSET = 96
+const WORKSPACE_KEYBOARD_EXTRA_OFFSET = 120
 const DEFAULT_JOB_DURATION_MINUTES = 60
 const DAY_TIMELINE_DEFAULT_START_HOUR = 8
 const DAY_TIMELINE_DEFAULT_END_HOUR = 18
@@ -676,6 +680,10 @@ const getApiErrorMessage = (payload, fallback) =>
 
 
 export default function App() {
+  const authScrollRef = useRef(null)
+  const workspaceScrollRef = useRef(null)
+  const focusedInputRef = useRef({ area: null, target: null })
+  const keyboardScrollTimeoutRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState(null)
   const [apiHealth, setApiHealth] = useState({ status: 'checking', message: 'Checking backend...' })
@@ -716,6 +724,51 @@ export default function App() {
   const [calendarView, setCalendarView] = useState('day')
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => startOfDay(new Date()))
   const [calendarJobTypesVisible, setCalendarJobTypesVisible] = useState(false)
+
+  const scrollFocusedInputIntoView = useCallback((area, target) => {
+    if (!target) return
+
+    const scrollRef = area === 'auth' ? authScrollRef.current : workspaceScrollRef.current
+    if (!scrollRef) return
+
+    const responder = typeof scrollRef.getScrollResponder === 'function' ? scrollRef.getScrollResponder() : scrollRef
+    if (typeof responder?.scrollResponderScrollNativeHandleToKeyboard !== 'function') return
+
+    requestAnimationFrame(() => {
+      responder.scrollResponderScrollNativeHandleToKeyboard(
+        target,
+        area === 'auth' ? AUTH_KEYBOARD_EXTRA_OFFSET : WORKSPACE_KEYBOARD_EXTRA_OFFSET,
+        true
+      )
+    })
+  }, [])
+
+  const scheduleScrollToFocusedInput = useCallback((area, target) => {
+    if (!target) return
+
+    if (keyboardScrollTimeoutRef.current) {
+      clearTimeout(keyboardScrollTimeoutRef.current)
+    }
+
+    keyboardScrollTimeoutRef.current = setTimeout(() => {
+      scrollFocusedInputIntoView(area, target)
+      keyboardScrollTimeoutRef.current = null
+    }, KEYBOARD_SCROLL_DELAY_MS)
+  }, [scrollFocusedInputIntoView])
+
+  const registerFocusedInput = useCallback((area, event) => {
+    const target = event?.target ?? event?.nativeEvent?.target
+    focusedInputRef.current = { area, target }
+    scheduleScrollToFocusedInput(area, target)
+  }, [scheduleScrollToFocusedInput])
+
+  const handleAuthInputFocus = useCallback((event) => {
+    registerFocusedInput('auth', event)
+  }, [registerFocusedInput])
+
+  const handleWorkspaceInputFocus = useCallback((event) => {
+    registerFocusedInput('workspace', event)
+  }, [registerFocusedInput])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -766,6 +819,23 @@ export default function App() {
   useEffect(() => {
     persistJobDraft(jobForm)
   }, [jobForm])
+
+  useEffect(() => {
+    const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const keyboardShowSubscription = Keyboard.addListener(keyboardShowEvent, () => {
+      const { area, target } = focusedInputRef.current
+      if (area && target) {
+        scheduleScrollToFocusedInput(area, target)
+      }
+    })
+
+    return () => {
+      keyboardShowSubscription.remove()
+      if (keyboardScrollTimeoutRef.current) {
+        clearTimeout(keyboardScrollTimeoutRef.current)
+      }
+    }
+  }, [scheduleScrollToFocusedInput])
 
   useEffect(() => {
     if (!session) {
@@ -1649,6 +1719,17 @@ export default function App() {
     )
   }
 
+  const renderCalendarLegend = () => (
+    <View style={styles.calendarLegend}>
+      {jobTypeOptions.map((jobType) => (
+        <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
+          <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
+          <Text style={styles.calendarLegendText}>{jobType.name}</Text>
+        </View>
+      ))}
+    </View>
+  )
+
   const renderCalendarContent = () => {
     if (calendarView === 'day') {
       const dayJobs = jobsByDate.get(toDateKey(calendarAnchorDate)) || []
@@ -1659,11 +1740,27 @@ export default function App() {
       return (
         <>
           <View style={commonStyles.panel}>
-            <Text style={commonStyles.heading3}>Appointments for the day</Text>
+            <View style={styles.calendarDayHeader}>
+              <Text style={commonStyles.heading3}>Appointments for the day</Text>
+              <Pressable
+                style={[styles.calendarInlineToggle, calendarJobTypesVisible ? styles.calendarInlineToggleActive : null]}
+                onPress={() => setCalendarJobTypesVisible((current) => !current)}
+              >
+                <Text style={styles.calendarInlineToggleText}>
+                  {calendarJobTypesVisible ? 'Hide Job Types' : 'Job Types'}
+                </Text>
+              </Pressable>
+            </View>
             <View style={styles.calendarDaySummaryRow}>
               <Text style={commonStyles.text}>{dayJobs.length} scheduled job{dayJobs.length === 1 ? '' : 's'}</Text>
               <Text style={styles.calendarGrossIncomeText}>Gross today: {formatCurrency(totalGrossIncomeToday)}</Text>
             </View>
+            <View style={styles.calendarDayActionRow}>
+              <Chip label="Previous" onPress={() => stepCalendar(-1)} />
+              <Chip label="Today" active onPress={jumpCalendarToToday} />
+              <Chip label="Next" onPress={() => stepCalendar(1)} />
+            </View>
+            {calendarJobTypesVisible ? <View style={styles.calendarDayLegendWrap}>{renderCalendarLegend()}</View> : null}
             {dayJobs.length === 0 ? (
               <View style={styles.calendarEmptyState}>
                 <Text style={commonStyles.text}>No jobs are scheduled for this day.</Text>
@@ -1895,6 +1992,7 @@ export default function App() {
         <StatusBar style="light" />
         <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
           <ScrollView
+            ref={authScrollRef}
             contentContainerStyle={styles.authScrollContent}
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
@@ -1932,17 +2030,17 @@ export default function App() {
                         <Text style={styles.authBackLink}>Back</Text>
                       </Pressable>
                     </View>
-                    {isCreate ? <FormField label="Display name" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.displayName} onChangeText={(value) => {
+                    {isCreate ? <FormField label="Display name" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.displayName} onFocus={handleAuthInputFocus} onChangeText={(value) => {
                       setAuthForm((current) => ({ ...current, displayName: value }))
                       setAuthErrors((current) => ({ ...current, displayName: '' }))
                       setAuthStatus(null)
                     }} error={authErrors.displayName} /> : null}
-                    <FormField label="Email" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.email} onChangeText={(value) => {
+                    <FormField label="Email" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.email} onFocus={handleAuthInputFocus} onChangeText={(value) => {
                       setAuthForm((current) => ({ ...current, email: value }))
                       setAuthErrors((current) => ({ ...current, email: '' }))
                       setAuthStatus(null)
                     }} error={authErrors.email} />
-                    <FormField label="Password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.password} onChangeText={(value) => {
+                    <FormField label="Password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.password} onFocus={handleAuthInputFocus} onChangeText={(value) => {
                       setAuthForm((current) => ({ ...current, password: value }))
                       setAuthErrors((current) => ({
                         ...current,
@@ -1953,7 +2051,7 @@ export default function App() {
                       }))
                       setAuthStatus(null)
                     }} error={authErrors.password} secureTextEntry />
-                    {isCreate ? <FormField label="Confirm password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.confirmPassword} onChangeText={(value) => {
+                    {isCreate ? <FormField label="Confirm password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.confirmPassword} onFocus={handleAuthInputFocus} onChangeText={(value) => {
                       setAuthForm((current) => ({ ...current, confirmPassword: value }))
                       setAuthErrors((current) => ({ ...current, confirmPassword: '' }))
                       setAuthStatus(null)
@@ -2006,6 +2104,7 @@ export default function App() {
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
         <ScrollView
+          ref={workspaceScrollRef}
           contentContainerStyle={commonStyles.content}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
@@ -2065,6 +2164,11 @@ export default function App() {
               </Panel>
               {jobsLoading ? <Panel><Text style={commonStyles.text}>Loading jobs...</Text></Panel> : null}
               {jobsError ? <Panel><Text style={commonStyles.errorText}>{jobsError}</Text></Panel> : null}
+              {!jobsLoading && !jobsError && jobs.length === 0 ? (
+                <Panel>
+                  <Text style={commonStyles.text}>Create a job to view jobs</Text>
+                </Panel>
+              ) : null}
               {!jobsLoading && !jobsError ? jobsGroupedByDate.map((group) => (
                 <Panel key={group.dateKey} title={group.title} subtitle={`${group.jobs.length} job${group.jobs.length === 1 ? '' : 's'}`}>
                   {group.jobs.map((job) => (
@@ -2097,12 +2201,12 @@ export default function App() {
                 >
                   <Text style={commonStyles.buttonText}>Use Existing Client</Text>
                 </Pressable>
-                <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
+                <FormField label="Client name" value={jobForm.name} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, name: value }))
                   setJobErrors((current) => ({ ...current, name: '' }))
                   setJobStatus(null)
                 }} error={jobErrors.name} placeholder="Jane Smith" helperText="Enter a new client name or adjust the selected client details here." />
-                <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
+                <FormField label="Phone" value={jobForm.phone} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
                   setJobErrors((current) => ({ ...current, phone: '' }))
                   setJobStatus(null)
@@ -2122,7 +2226,7 @@ export default function App() {
                   onCreateNew={() => setJobSuggestionField(null)}
                   createLabel="Keep this as a new client"
                 />
-                <FormField label="Service address" value={jobForm.address} onChangeText={(value) => {
+                <FormField label="Service address" value={jobForm.address} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, address: value }))
                   setJobErrors((current) => ({ ...current, address: '' }))
                   setJobStatus(null)
@@ -2154,7 +2258,7 @@ export default function App() {
                   setJobErrors((current) => ({ ...current, jobType: '' }))
                   setJobStatus(null)
                 }} error={jobErrors.jobType} options={jobTypeOptions.map((jobType) => jobType.name)} />
-                <CurrencyField label="Quoted amount" value={jobForm.payment} onChangeText={(value) => {
+                <CurrencyField label="Quoted amount" value={jobForm.payment} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, payment: value }))
                   setJobErrors((current) => ({ ...current, payment: '' }))
                   setJobStatus(null)
@@ -2175,7 +2279,7 @@ export default function App() {
                     }} error={jobErrors.startTime} />
                   </View>
                 </View>
-                <FormField label="Dispatch notes" value={jobForm.comments} onChangeText={(value) => {
+                <FormField label="Dispatch notes" value={jobForm.comments} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, comments: value }))
                   setJobErrors((current) => ({ ...current, comments: '' }))
                   setJobStatus(null)
@@ -2217,6 +2321,7 @@ export default function App() {
                     <FormField
                       label="Name"
                       value={jobTypeDraft.name}
+                      onFocus={handleWorkspaceInputFocus}
                       onChangeText={(value) => {
                         setJobTypeDraft((current) => ({ ...current, name: value }))
                         setJobTypeFormError('')
@@ -2245,6 +2350,7 @@ export default function App() {
                     <TextInput
                       style={commonStyles.input}
                       value={jobTypeDraft.color}
+                      onFocus={handleWorkspaceInputFocus}
                       onChangeText={(value) => {
                         setJobTypeDraft((current) => ({ ...current, color: value }))
                         setJobTypeFormError('')
@@ -2312,6 +2418,11 @@ export default function App() {
                 <Text style={commonStyles.sectionTitle}>Clients</Text>
                 <TextInput style={commonStyles.input} value={clientSearch} onChangeText={setClientSearch} placeholder="Search by name, phone, or address" placeholderTextColor={colors.textMuted} />
               </View>
+              {clients.length === 0 ? (
+                <Panel>
+                  <Text style={commonStyles.text}>Create a job to view clients</Text>
+                </Panel>
+              ) : null}
               {filteredClients.map((client) => (
                 <View key={client.id} style={commonStyles.panel}>
                   <View style={commonStyles.rowBetween}>
@@ -2530,30 +2641,25 @@ export default function App() {
                     ))}
                   </View>
                 </ScrollView>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                  <View style={styles.calendarControls}>
-                    <Chip label="Previous" onPress={() => stepCalendar(-1)} />
-                    <Chip label="Today" active onPress={jumpCalendarToToday} />
-                    <Chip label="Next" onPress={() => stepCalendar(1)} />
-                  </View>
-                </ScrollView>
-                <Pressable
-                  style={[commonStyles.button, commonStyles.buttonSecondary, styles.calendarLegendToggle]}
-                  onPress={() => setCalendarJobTypesVisible((current) => !current)}
-                >
-                  <Text style={commonStyles.buttonText}>
-                    {calendarJobTypesVisible ? 'Hide Job Types' : 'View Job Types'}
-                  </Text>
-                </Pressable>
-                {calendarJobTypesVisible ? (
-                  <View style={styles.calendarLegend}>
-                    {jobTypeOptions.map((jobType) => (
-                      <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
-                        <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
-                        <Text style={styles.calendarLegendText}>{jobType.name}</Text>
+                {calendarView !== 'day' ? (
+                  <>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                      <View style={styles.calendarControls}>
+                        <Chip label="Previous" onPress={() => stepCalendar(-1)} />
+                        <Chip label="Today" active onPress={jumpCalendarToToday} />
+                        <Chip label="Next" onPress={() => stepCalendar(1)} />
                       </View>
-                    ))}
-                  </View>
+                    </ScrollView>
+                    <Pressable
+                      style={[commonStyles.button, commonStyles.buttonSecondary, styles.calendarLegendToggle]}
+                      onPress={() => setCalendarJobTypesVisible((current) => !current)}
+                    >
+                      <Text style={commonStyles.buttonText}>
+                        {calendarJobTypesVisible ? 'Hide Job Types' : 'View Job Types'}
+                      </Text>
+                    </Pressable>
+                    {calendarJobTypesVisible ? renderCalendarLegend() : null}
+                  </>
                 ) : null}
               </View>
               {renderCalendarContent()}
@@ -3897,6 +4003,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12
   },
+  calendarDayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12
+  },
   calendarRangeInline: {
     color: colors.text,
     fontSize: 13,
@@ -3914,6 +4026,26 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 14,
     paddingHorizontal: 16
+  },
+  calendarInlineToggle: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  calendarInlineToggleActive: {
+    backgroundColor: 'rgba(109, 124, 255, 0.16)',
+    borderColor: 'rgba(109, 124, 255, 0.36)'
+  },
+  calendarInlineToggleText: {
+    color: colors.heading,
+    fontSize: 12,
+    fontWeight: '800'
   },
   calendarLegend: {
     flexDirection: 'row',
@@ -4016,6 +4148,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12
+  },
+  calendarDayActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14
+  },
+  calendarDayLegendWrap: {
+    marginTop: 14
   },
   calendarGrossIncomeText: {
     color: colors.heading,
