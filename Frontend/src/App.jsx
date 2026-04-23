@@ -105,6 +105,7 @@ function AppContent() {
   const location = useLocation()
   const navigate = useNavigate()
   const isLogin = location.pathname === '/'
+  const isJobCreationPage = location.pathname === '/jobs/new'
   const isStandalonePublicPage = STANDALONE_PUBLIC_PATHS.has(location.pathname)
 
   const updateSessionFromLogin = useCallback((payload) => {
@@ -267,14 +268,14 @@ function AppContent() {
   return (
     <div className={`app-shell${isLogin || isStandalonePublicPage ? ' app-shell--login' : ''}`}>
       {!isLogin && !isStandalonePublicPage && (
-            <aside className="app-sidebar">
-              <div className="sidebar-brand-block">
-                <div className="sidebar-brand-mark">AA</div>
-                <div>
-                  <p className="sidebar-eyebrow">Appointment toolkit</p>
-                  <h1 className="sidebar-brand-title">Appointment Assistant</h1>
-                </div>
-              </div>
+        <aside className="app-sidebar">
+          <div className="sidebar-brand-block">
+            <div className="sidebar-brand-mark">AA</div>
+            <div>
+              <p className="sidebar-eyebrow">Appointment toolkit</p>
+              <h1 className="sidebar-brand-title">Appointment Assistant</h1>
+            </div>
+          </div>
 
           <nav className="sidebar-nav" aria-label="Primary navigation">
             {NAV_ITEMS.map((item) => (
@@ -298,7 +299,7 @@ function AppContent() {
 
       <main className="app-main">
         {!isLogin && !isStandalonePublicPage && (
-          <header className="page-header">
+          <header className={`page-header${isJobCreationPage ? ' page-header--workflow' : ''}`}>
             <div className="page-header-content">
               <div className="page-header-main">
                 <p className="page-header-kicker">Workspace overview</p>
@@ -371,7 +372,9 @@ function AppContent() {
           </header>
         )}
 
-        <section className={`page-content${isLogin || isStandalonePublicPage ? ' page-content--login' : ''}`}>
+        <section
+          className={`page-content${isLogin || isStandalonePublicPage ? ' page-content--login' : ''}${isJobCreationPage ? ' page-content--workflow' : ''}`}
+        >
           <ApiContext.Provider value={apiContextValue}>
             <Routes>
               <Route path="/" element={<LoginPage onLogin={updateSessionFromLogin} />} />

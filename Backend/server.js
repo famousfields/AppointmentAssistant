@@ -172,6 +172,8 @@ const getRefreshCookieOptions = () => ({
   maxAgeSeconds: REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60
 });
 
+const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
+
 const validateRuntimeConfig = () => {
   const missing = [];
   if (!ACCESS_TOKEN_SECRET) missing.push("ACCESS_TOKEN_SECRET");
@@ -893,9 +895,25 @@ app.post(
   "/users",
   authLimiter,
   [
-    body("username").trim().isLength({ min: 3 }).withMessage("Name must be at least 3 characters"),
-    body("email").isEmail().withMessage("Valid email is required"),
-    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters")
+    body("displayName")
+      .optional({ values: "falsy" })
+      .trim()
+      .isLength({ min: 3 })
+      .withMessage("Display name must be at least 3 characters"),
+    body("username")
+      .optional({ values: "falsy" })
+      .trim()
+      .isLength({ min: 3 })
+      .withMessage("Name must be at least 3 characters"),
+    body("email").customSanitizer(normalizeEmailAddress).isEmail().withMessage("Valid email is required"),
+    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters"),
+    body().custom((value) => {
+      const displayName = String(value?.displayName || value?.username || "").trim();
+      if (displayName.length < 3) {
+        throw new Error("Display name must be at least 3 characters");
+      }
+      return true;
+    })
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -903,11 +921,13 @@ app.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { username, email, password } = req.body;
+    const username = String(req.body.displayName || req.body.username || "").trim();
+    const email = normalizeEmailAddress(req.body.email);
+    const { password } = req.body;
 
     try {
       const [existingUsers] = await db.promise().query(
-        "SELECT id FROM users WHERE name = ? OR email = ? LIMIT 1",
+        "SELECT id FROM users WHERE name = ? OR LOWER(email) = ? LIMIT 1",
         [username, email]
       );
 
@@ -939,19 +959,37 @@ app.post(
   "/auth/login",
   authLimiter,
   [
-    body("usernameOrEmail").trim().notEmpty().withMessage("Username or email is required"),
+    body("email")
+      .optional({ values: "falsy" })
+      .customSanitizer(normalizeEmailAddress)
+      .isEmail()
+      .withMessage("Valid email is required"),
+    body("usernameOrEmail")
+      .optional({ values: "falsy" })
+      .trim(),
+    body().custom((value) => {
+      const hasEmail = normalizeEmailAddress(value?.email).length > 0;
+      const hasUsernameOrEmail = String(value?.usernameOrEmail || "").trim().length > 0;
+      if (!hasEmail && !hasUsernameOrEmail) {
+        throw new Error("Email is required");
+      }
+      return true;
+    }),
     body("password").notEmpty().withMessage("Password is required")
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { usernameOrEmail, password } = req.body;
+    const email = normalizeEmailAddress(req.body.email);
+    const usernameOrEmail = String(req.body.usernameOrEmail || "").trim();
+    const password = String(req.body.password || "");
+    const loginIdentifier = email || usernameOrEmail;
 
     try {
       const [rows] = await db.promise().query(
-        "SELECT id, name, email, password FROM users WHERE name = ? OR email = ? LIMIT 1",
-        [usernameOrEmail, usernameOrEmail]
+        "SELECT id, name, email, password FROM users WHERE name = ? OR LOWER(email) = ? LIMIT 1",
+        [loginIdentifier, loginIdentifier]
       );
 
       const user = rows[0];

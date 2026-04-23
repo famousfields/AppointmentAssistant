@@ -9,9 +9,9 @@ export default function LoginPage({ onLogin }) {
   const navigate = useNavigate()
   const [formMode, setFormMode] = useState('login')
   const [formData, setFormData] = useState({
-    username: '',
-    password: '',
+    displayName: '',
     email: '',
+    password: '',
     confirmPassword: ''
   })
   const [status, setStatus] = useState(null)
@@ -49,7 +49,7 @@ export default function LoginPage({ onLogin }) {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            username: formData.username,
+            displayName: formData.displayName,
             password: formData.password,
             email: formData.email
           })
@@ -84,7 +84,8 @@ export default function LoginPage({ onLogin }) {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          usernameOrEmail: formData.username,
+          email: formData.email,
+          usernameOrEmail: formData.email,
           password: formData.password
         })
       })
@@ -100,8 +101,8 @@ export default function LoginPage({ onLogin }) {
         setStatus({ type: 'error', message: errorMessage })
       } else {
         const userPayload = payload.user || {
-          email: formData.username,
-          name: formData.username
+          email: formData.email,
+          name: formData.displayName || formData.email
         }
         setStatus({
           type: 'success',
@@ -153,17 +154,31 @@ export default function LoginPage({ onLogin }) {
           </p>
         </div>
 
-        <label htmlFor="username">{isCreateMode ? 'Username' : 'Email or username'}</label>
-        <input
-          id="username"
-          name="username"
-          type="text"
-          value={formData.username}
-          onChange={handleChange}
-          required
-        />
-
         {isCreateMode && (
+          <>
+            <label htmlFor="displayName">Display name</label>
+            <input
+              id="displayName"
+              name="displayName"
+              type="text"
+              value={formData.displayName}
+              onChange={handleChange}
+              required
+            />
+
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+            />
+          </>
+        )}
+
+        {!isCreateMode && (
           <>
             <label htmlFor="email">Email</label>
             <input

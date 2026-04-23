@@ -269,6 +269,23 @@
   color: var(--text);
 }
 
+.page-header--workflow {
+  width: min(100%, 1240px);
+}
+
+.page-header--workflow .page-header-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  align-items: start;
+}
+
+.page-header--workflow .page-header-account,
+.page-header--workflow .page-header-plan,
+.page-header--workflow .user-menu-container {
+  width: 100%;
+  min-width: 0;
+}
+
 .page-content {
   width: min(100%, 1600px);
   min-width: 0;
@@ -280,6 +297,10 @@
 .page-content > * {
   width: 100%;
   min-width: 0;
+}
+
+.page-content--workflow {
+  width: min(100%, 1240px);
 }
 
 .page-content--login {
@@ -1706,6 +1727,10 @@
     min-width: 0;
   }
 
+  .page-header--workflow .page-header-content {
+    grid-template-columns: 1fr;
+  }
+
   .client-card {
     flex-direction: column;
     align-items: stretch;
@@ -2935,6 +2960,10 @@
 }
 
 @media (max-width: 1360px) {
+  .page-header--workflow .page-header-content {
+    grid-template-columns: 1fr;
+  }
+
   .job-form-shell {
     grid-template-columns: 1fr;
   }

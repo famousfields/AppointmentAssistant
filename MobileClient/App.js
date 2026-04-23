@@ -686,7 +686,8 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedClient, setSelectedClient] = useState(null)
   const [authMode, setAuthMode] = useState('login')
-  const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', confirmPassword: '' })
+  const [authScreenMode, setAuthScreenMode] = useState(null)
+  const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '', confirmPassword: '' })
   const [authErrors, setAuthErrors] = useState({})
   const [authStatus, setAuthStatus] = useState(null)
   const [authSubmitting, setAuthSubmitting] = useState(false)
@@ -1220,20 +1221,20 @@ export default function App() {
     const trimmed = String(value || '').trim()
 
     switch (name) {
-      case 'username':
+      case 'email':
         if (!trimmed) {
           return mode === 'create'
-            ? 'Choose a username before creating your account.'
-            : 'Enter your email or username to sign in.'
+            ? 'Enter an email address for the new account.'
+            : 'Enter the email address for your account.'
         }
-        if (mode === 'create' && trimmed.length < 3) {
-          return 'Username must be at least 3 characters long.'
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? '' : 'Enter a valid email address.'
+      case 'displayName':
+        if (mode !== 'create') return ''
+        if (!trimmed) return 'Choose a display name before creating your account.'
+        if (trimmed.length < 3) {
+          return 'Display name must be at least 3 characters long.'
         }
         return ''
-      case 'email':
-        if (mode !== 'create') return ''
-        if (!trimmed) return 'Enter an email address for the new account.'
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? '' : 'Enter a valid email address.'
       case 'password':
         if (!value) {
           return mode === 'create'
@@ -1257,11 +1258,11 @@ export default function App() {
     const normalized = String(message || '').toLowerCase()
 
     if (normalized.includes('invalid credentials')) {
-      return 'That email, username, or password did not match our records.'
+      return 'That email or password did not match our records.'
     }
     if (normalized.includes('duplicate') || normalized.includes('already') || normalized.includes('taken')) {
       return mode === 'create'
-        ? 'That username or email is already in use. Try a different one or sign in instead.'
+        ? 'That email address is already in use. Try signing in instead.'
         : 'That account already exists. Try signing in.'
     }
     if (normalized.includes('validation')) {
@@ -1292,6 +1293,20 @@ export default function App() {
     return 'We could not save this appointment. Review the details and try again.'
   }
 
+  const openAuthScreen = (mode) => {
+    setAuthMode(mode)
+    setAuthScreenMode(mode)
+    setAuthErrors({})
+    setAuthStatus(null)
+  }
+
+  const closeAuthScreen = () => {
+    if (authSubmitting) return
+    setAuthScreenMode(null)
+    setAuthErrors({})
+    setAuthStatus(null)
+  }
+
   const submitAuth = async () => {
     const isCreate = authMode === 'create'
     const nextAuthErrors = Object.keys(authForm).reduce((accumulator, key) => {
@@ -1314,7 +1329,7 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: authForm.username,
+            displayName: authForm.displayName,
             email: authForm.email,
             password: authForm.password
           })
@@ -1322,14 +1337,17 @@ export default function App() {
         const payload = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create account')
         setAuthMode('login')
+        setAuthScreenMode('login')
+        setAuthForm((current) => ({ ...current, password: '', confirmPassword: '' }))
         setAuthErrors({})
-        setAuthStatus({ type: 'success', message: payload.message || 'Account created' })
+        setAuthStatus({ type: 'success', message: payload.message || 'Account created. Log in to continue.' })
       } else {
         const response = await fetch(`${API_BASE}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            usernameOrEmail: authForm.username,
+            email: authForm.email,
+            usernameOrEmail: authForm.email,
             password: authForm.password
           })
         })
@@ -1870,76 +1888,111 @@ export default function App() {
 
   if (!session) {
     const isCreate = authMode === 'create'
+    const authScreenActive = Boolean(authScreenMode)
+    const authHealthMessage = apiHealth.status === 'success' ? 'Backend connected and ready.' : apiHealth.message
     return (
-      <SafeAreaView style={commonStyles.screen}>
+      <SafeAreaView style={[commonStyles.screen, styles.authScreen]}>
         <StatusBar style="light" />
         <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
           <ScrollView
-            contentContainerStyle={commonStyles.content}
+            contentContainerStyle={styles.authScrollContent}
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
           >
-            <Panel title="Appointment Assistant" subtitle="Appointment toolkit">
-              <Text style={commonStyles.text}>
-                Manage client appointments, track job details, and keep your schedule organized from one mobile workspace.
-              </Text>
-              <Text style={apiHealth.status === 'error' ? commonStyles.errorText : apiHealth.status === 'success' ? commonStyles.successText : commonStyles.text}>
-                {apiHealth.message}
-              </Text>
-            </Panel>
-            <View style={commonStyles.panel}>
-              <View style={styles.tabs}>
-                <Tab active={!isCreate} label="Login" onPress={() => {
-                  setAuthMode('login')
-                  setAuthErrors({})
-                  setAuthStatus(null)
-                }} />
-                <Tab active={isCreate} label="Create account" onPress={() => {
-                  setAuthMode('create')
-                  setAuthErrors({})
-                  setAuthStatus(null)
-                }} />
+            <View style={styles.authBackdrop}>
+              <View style={styles.authGlowTop} />
+              <View style={styles.authGlowBottom} />
+              <View style={styles.authGrid} />
+              <View style={styles.authHero}>
+                <Text style={styles.authEyebrow}>Mobile scheduling for service teams</Text>
+                <View style={styles.authMonogram}>
+                  <Text style={styles.authMonogramText}>AA</Text>
+                </View>
+                <Text style={styles.authWordmarkPrimary}>APPOINTMENT</Text>
+                <Text style={styles.authWordmarkAccent}>ASSISTANT</Text>
+                <Text style={styles.authHeroTitle}>Manage bookings, clients, and calendar updates from one workspace.</Text>
+                <Text style={apiHealth.status === 'error' ? styles.authHeroStatusError : styles.authHeroStatus}>
+                  {authHealthMessage}
+                </Text>
               </View>
-              <FormField label={isCreate ? 'Username' : 'Email or username'} value={authForm.username} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, username: value }))
-                setAuthErrors((current) => ({ ...current, username: '' }))
-                setAuthStatus(null)
-              }} error={authErrors.username} />
-              {isCreate ? <FormField label="Email" value={authForm.email} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, email: value }))
-                setAuthErrors((current) => ({ ...current, email: '' }))
-                setAuthStatus(null)
-              }} error={authErrors.email} /> : null}
-              <FormField label="Password" value={authForm.password} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, password: value }))
-                setAuthErrors((current) => ({
-                  ...current,
-                  password: '',
-                  confirmPassword: authMode === 'create' && authForm.confirmPassword && authForm.confirmPassword !== value
-                    ? 'The password confirmation does not match.'
-                    : ''
-                }))
-                setAuthStatus(null)
-              }} error={authErrors.password} secureTextEntry />
-              {isCreate ? <FormField label="Confirm password" value={authForm.confirmPassword} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, confirmPassword: value }))
-                setAuthErrors((current) => ({ ...current, confirmPassword: '' }))
-                setAuthStatus(null)
-              }} error={authErrors.confirmPassword} secureTextEntry /> : null}
-              <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitAuth}>
-                <Text style={commonStyles.buttonText}>{authSubmitting ? 'Working...' : isCreate ? 'Create account' : 'Sign in'}</Text>
-              </Pressable>
-              {authStatus ? <Text style={authStatus.type === 'error' ? commonStyles.errorText : commonStyles.successText}>{authStatus.message}</Text> : null}
-              <View style={styles.inlineLinkRow}>
-                <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.privacy)}>
-                  <Text style={styles.inlineLinkText}>Privacy policy</Text>
-                </Pressable>
-                <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.support)}>
-                  <Text style={styles.inlineLinkText}>Support</Text>
-                </Pressable>
-                <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.account)}>
-                  <Text style={styles.inlineLinkText}>Account page</Text>
-                </Pressable>
+              <View style={styles.authSheet}>
+                {authScreenActive ? (
+                  <View style={styles.authFormWrap}>
+                    <View style={styles.authFormHeader}>
+                      <View style={styles.authFormCopy}>
+                        <Text style={styles.authFormEyebrow}>{isCreate ? 'Create your workspace' : 'Welcome back'}</Text>
+                        <Text style={styles.authFormTitle}>{isCreate ? 'Sign Up Free' : 'Log In'}</Text>
+                        <Text style={styles.authFormText}>
+                          {isCreate
+                            ? 'Start with your email and create an account when you are ready.'
+                            : 'Enter your account details to get back into your schedule.'}
+                        </Text>
+                      </View>
+                      <Pressable onPress={closeAuthScreen}>
+                        <Text style={styles.authBackLink}>Back</Text>
+                      </Pressable>
+                    </View>
+                    {isCreate ? <FormField label="Display name" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.displayName} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, displayName: value }))
+                      setAuthErrors((current) => ({ ...current, displayName: '' }))
+                      setAuthStatus(null)
+                    }} error={authErrors.displayName} /> : null}
+                    <FormField label="Email" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.email} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, email: value }))
+                      setAuthErrors((current) => ({ ...current, email: '' }))
+                      setAuthStatus(null)
+                    }} error={authErrors.email} />
+                    <FormField label="Password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.password} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, password: value }))
+                      setAuthErrors((current) => ({
+                        ...current,
+                        password: '',
+                        confirmPassword: authMode === 'create' && authForm.confirmPassword && authForm.confirmPassword !== value
+                          ? 'The password confirmation does not match.'
+                          : ''
+                      }))
+                      setAuthStatus(null)
+                    }} error={authErrors.password} secureTextEntry />
+                    {isCreate ? <FormField label="Confirm password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.confirmPassword} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, confirmPassword: value }))
+                      setAuthErrors((current) => ({ ...current, confirmPassword: '' }))
+                      setAuthStatus(null)
+                    }} error={authErrors.confirmPassword} secureTextEntry /> : null}
+                    <Pressable style={[commonStyles.button, styles.authPrimaryButton]} onPress={submitAuth}>
+                      <View style={styles.authPrimaryButtonGlow} />
+                      <View style={styles.authPrimaryButtonGlowSecondary} />
+                      <Text style={styles.authPrimaryButtonText}>{authSubmitting ? 'Working...' : isCreate ? 'Sign Up Free' : 'Log In'}</Text>
+                    </Pressable>
+                    {authStatus ? <Text style={authStatus.type === 'error' ? commonStyles.errorText : commonStyles.successText}>{authStatus.message}</Text> : null}
+                    <Pressable onPress={() => openAuthScreen(isCreate ? 'login' : 'create')}>
+                      <Text style={styles.authModeSwitch}>
+                        {isCreate ? 'Already have an account? Log In' : 'Need an account? Sign Up Free'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.authCtaStack}>
+                    <Pressable style={[commonStyles.button, styles.authPrimaryButton]} onPress={() => openAuthScreen('create')}>
+                      <View style={styles.authPrimaryButtonGlow} />
+                      <View style={styles.authPrimaryButtonGlowSecondary} />
+                      <Text style={styles.authPrimaryButtonText}>Sign Up Free</Text>
+                    </Pressable>
+                    <Pressable style={[commonStyles.button, styles.authSecondaryButton]} onPress={() => openAuthScreen('login')}>
+                      <Text style={styles.authSecondaryButtonText}>Log In</Text>
+                    </Pressable>
+                  </View>
+                )}
+                <View style={styles.inlineLinkRow}>
+                  <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.privacy)}>
+                    <Text style={styles.authInlineLinkText}>Privacy policy</Text>
+                  </Pressable>
+                  <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.support)}>
+                    <Text style={styles.authInlineLinkText}>Support</Text>
+                  </Pressable>
+                  <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.account)}>
+                    <Text style={styles.authInlineLinkText}>Account page</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
           </ScrollView>
@@ -2618,11 +2671,11 @@ function ExistingClientPicker({ visible, clients, query, onChangeQuery, onClose,
   )
 }
 
-function FormField({ label, error, helperText, belowInput = null, multiline, ...props }) {
+function FormField({ label, error, helperText, belowInput = null, multiline, labelStyle, inputStyle, ...props }) {
   return (
     <View>
-      <Text style={commonStyles.label}>{label}</Text>
-      <TextInput style={[commonStyles.input, multiline ? styles.multiline : null]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
+      <Text style={[commonStyles.label, labelStyle]}>{label}</Text>
+      <TextInput style={[commonStyles.input, multiline ? styles.multiline : null, inputStyle]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
       {belowInput}
       {helperText ? <Text style={commonStyles.helperText}>{helperText}</Text> : null}
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
@@ -3171,6 +3224,238 @@ function JobModal({ job, clients, jobTypes = [], onClose, onSave, onDelete }) {
 }
 
 const styles = StyleSheet.create({
+  authScreen: {
+    backgroundColor: '#07111f'
+  },
+  authScrollContent: {
+    flexGrow: 1
+  },
+  authBackdrop: {
+    flex: 1,
+    minHeight: '100%',
+    backgroundColor: '#07111f',
+    overflow: 'hidden'
+  },
+  authGlowTop: {
+    position: 'absolute',
+    top: -110,
+    right: -90,
+    width: 300,
+    height: 300,
+    borderRadius: 999,
+    backgroundColor: 'rgba(109, 124, 255, 0.34)'
+  },
+  authGlowBottom: {
+    position: 'absolute',
+    bottom: 180,
+    left: -100,
+    width: 260,
+    height: 260,
+    borderRadius: 999,
+    backgroundColor: 'rgba(52, 211, 153, 0.18)'
+  },
+  authGrid: {
+    position: 'absolute',
+    top: 72,
+    right: -60,
+    width: 260,
+    height: 260,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    transform: [{ rotate: '16deg' }]
+  },
+  authHero: {
+    flex: 1,
+    minHeight: 520,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    paddingTop: 54,
+    paddingBottom: 40,
+    gap: 14
+  },
+  authEyebrow: {
+    color: 'rgba(226, 232, 240, 0.9)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase'
+  },
+  authMonogram: {
+    width: 128,
+    height: 128,
+    borderRadius: 34,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(15, 23, 42, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#020617',
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8
+  },
+  authMonogramText: {
+    color: '#f8fafc',
+    fontSize: 46,
+    fontWeight: '900',
+    letterSpacing: -2
+  },
+  authWordmarkPrimary: {
+    color: '#f8fafc',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+    textAlign: 'center'
+  },
+  authWordmarkAccent: {
+    color: '#a855f7',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+    textAlign: 'center',
+    marginTop: -12
+  },
+  authHeroTitle: {
+    color: '#e2e8f0',
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '800',
+    textAlign: 'center',
+    maxWidth: 360
+  },
+  authHeroStatus: {
+    color: 'rgba(226, 232, 240, 0.78)',
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    maxWidth: 320
+  },
+  authHeroStatusError: {
+    color: '#fda4af',
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    maxWidth: 320
+  },
+  authSheet: {
+    marginTop: 'auto',
+    backgroundColor: '#f8fafc',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 28,
+    gap: 18
+  },
+  authCtaStack: {
+    gap: 14
+  },
+  authFormWrap: {
+    gap: 14
+  },
+  authFormHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14
+  },
+  authFormCopy: {
+    flex: 1,
+    gap: 4
+  },
+  authFormEyebrow: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase'
+  },
+  authFormTitle: {
+    color: '#0f172a',
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: -0.8
+  },
+  authFormText: {
+    color: '#475569',
+    fontSize: 14,
+    lineHeight: 20
+  },
+  authBackLink: {
+    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '800',
+    paddingTop: 2
+  },
+  authInputLabel: {
+    color: '#0f172a'
+  },
+  authInput: {
+    backgroundColor: '#ffffff',
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    color: '#0f172a'
+  },
+  authPrimaryButton: {
+    backgroundColor: '#a855f7',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.38)',
+    overflow: 'hidden',
+    position: 'relative',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6
+  },
+  authPrimaryButtonGlow: {
+    position: 'absolute',
+    top: -18,
+    left: -10,
+    width: 150,
+    height: 70,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.16)'
+  },
+  authPrimaryButtonGlowSecondary: {
+    position: 'absolute',
+    right: -18,
+    bottom: -20,
+    width: 130,
+    height: 72,
+    borderRadius: 999,
+    backgroundColor: 'rgba(192, 132, 252, 0.28)'
+  },
+  authPrimaryButtonText: {
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 16,
+    zIndex: 1
+  },
+  authSecondaryButton: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.12)'
+  },
+  authSecondaryButtonText: {
+    color: '#a855f7',
+    fontWeight: '900',
+    fontSize: 16
+  },
+  authModeSwitch: {
+    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingTop: 4
+  },
+  authInlineLinkText: {
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '700'
+  },
   keyboardFrame: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   workspaceOverview: {
