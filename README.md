@@ -95,8 +95,10 @@ Point the Stripe webhook endpoint at the Railway backend:
 ## Current quality gates
 - Backend: `npm run check`, `npm test`
 - Frontend: `npm run lint`, `npm test`
+- Mobile: `npm run check` (from `MobileClient/`)
+- CI: `.github/workflows/quality-gates.yml` runs backend/frontend/mobile checks on pushes and pull requests to `production` and `main`.
 
 ## Next steps
-1. Add CI to run backend checks/tests plus frontend lint/tests on every pull request.
-2. Add integration coverage for login, refresh, logout, and job CRUD flows.
-3. Add deployment-side safeguards such as HTTPS, backups, monitoring, and restore drills before public launch.
+1. Add integration coverage for login, refresh, logout, and job CRUD flows.
+2. Add deployment-side safeguards such as HTTPS, backups, monitoring, and restore drills before public launch.
+3. Enforce branch protection on `production` so `Quality Gates` must pass before merge.

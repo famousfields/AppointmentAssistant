@@ -5,14 +5,29 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "scheme": "appointmentassistant",
+    "icon": "./assets/icon.png",
     "assetBundlePatterns": [
       "**/*"
     ],
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0f1d"
+    },
     "plugins": [
       "@react-native-community/datetimepicker"
     ],
+    "ios": {
+      "bundleIdentifier": "com.appointmentassistant.mobile",
+      "supportsTablet": true
+    },
     "android": {
-      "package": "com.anonymous.appointmentassistantmobile"
+      "package": "com.anonymous.appointmentassistantmobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0f1d"
+      }
     },
     "extra": {
       "eas": {
