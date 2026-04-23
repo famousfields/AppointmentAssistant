@@ -1,46 +1,85 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BrowserRouter as Router, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useRef } from 'react'
 import './App.css'
 import JobForm from './JobForm'
 import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
+import LandingScreen from './landingscreen'
+import PricingPage from './PricingPage'
+import FeaturesPage from './FeaturesPage'
 import CalendarPage from './CalendarPage'
 import BillingPage from './BillingPage'
+import PrivacyPage from './PrivacyPage'
+import SupportPage from './SupportPage'
+import AccountPage from './AccountPage'
 import { API_BASE, getTokenExpiry } from './api'
 import { ApiContext } from './apiContext'
 import useSubscription from './useSubscription'
+import { APP_PATHS, PUBLIC_PATHS } from './appInfo'
 
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
+const USAGE_LIMIT_PROMPT_STORAGE_PREFIX = 'appointment-assistant:usage-limit-prompt:'
 
 const NAV_ITEMS = [
-  { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
-  { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
-  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' }
+  { label: 'Calendar', path: APP_PATHS.calendar, description: 'View your jobs by day, week, month, or year.' },
+  { label: 'View Jobs', path: APP_PATHS.jobs, description: 'Track every upcoming and completed job.', matchExact: true },
+  { label: 'Clients', path: APP_PATHS.clients, description: 'Browse customers and their job history.' }
 ]
 
 const PAGE_META = {
-  '/jobs/new': {
+  [APP_PATHS.newJob]: {
     title: 'Create a new job',
     description: 'Add an appointment with client details, scheduling info, and notes.'
   },
-  '/jobs': {
+  [PUBLIC_PATHS.home]: {
+    title: 'Appointment Assistant',
+    description: 'Scheduling, client tracking, and job management for service businesses across desktop and mobile.'
+  },
+  [PUBLIC_PATHS.features]: {
+    title: 'Features',
+    description: 'See what Appointment Assistant includes for scheduling, client records, and mobile operations.'
+  },
+  [PUBLIC_PATHS.pricing]: {
+    title: 'Pricing',
+    description: 'Review free and paid plan options for Appointment Assistant.'
+  },
+  [APP_PATHS.jobs]: {
     title: 'Job dashboard',
     description: 'Review active work, update statuses, and keep every appointment on track.'
   },
-  '/clients': {
+  [APP_PATHS.clients]: {
     title: 'Client relationships',
     description: 'See every client and drill into their job history in one place.'
   },
-  '/calendar': {
+  [APP_PATHS.calendar]: {
     title: 'Calendar overview',
     description: 'See every scheduled job in daily, weekly, monthly, and yearly calendar views.'
   },
-  '/billing': {
+  [APP_PATHS.dashboard]: {
+    title: 'Calendar overview',
+    description: 'See every scheduled job in daily, weekly, monthly, and yearly calendar views.'
+  },
+  [APP_PATHS.billing]: {
     title: 'Billing and plans',
     description: 'Review your plan, usage, monthly reset date, and upgrade options.'
+  },
+  [PUBLIC_PATHS.privacy]: {
+    title: 'Privacy policy',
+    description: 'Review how Appointment Assistant handles account, client, and job data.'
+  },
+  [PUBLIC_PATHS.support]: {
+    title: 'Support',
+    description: 'Find billing, privacy, and account support resources.'
+  },
+  [PUBLIC_PATHS.account]: {
+    title: 'Account management',
+    description: 'Manage account deletion and review your workspace data controls.'
   }
 }
+
+const STANDALONE_PUBLIC_PATHS = new Set([PUBLIC_PATHS.privacy, PUBLIC_PATHS.support, PUBLIC_PATHS.account])
 
 const buildSessionRecord = ({ user, accessToken }) => {
   if (!accessToken) return null
@@ -73,6 +112,54 @@ const loadSessionFromStorage = () => {
   }
 }
 
+const getUsageLimitPromptStorageKey = (userId) =>
+  `${USAGE_LIMIT_PROMPT_STORAGE_PREFIX}${userId ?? 'guest'}`
+
+const formatBillingResetDate = (value) => {
+  if (!value) return 'Unavailable'
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+const getUsageLimitPromptDetails = (summary) => {
+  if (!summary || summary.planCode !== 'free' || !summary.entitlements?.creationBlocked) {
+    return null
+  }
+
+  const usage = summary.usage || {}
+  const clientsBlocked =
+    usage.monthlyClientLimit !== null &&
+    usage.monthlyClientLimit !== undefined &&
+    Number(usage.monthlyClientCreations ?? 0) >= Number(usage.monthlyClientLimit)
+  const jobsBlocked =
+    usage.monthlyJobLimit !== null &&
+    usage.monthlyJobLimit !== undefined &&
+    Number(usage.monthlyJobCreations ?? 0) >= Number(usage.monthlyJobLimit)
+
+  const exhaustedLimits = []
+  if (clientsBlocked) exhaustedLimits.push(`${usage.monthlyClientLimit} clients`)
+  if (jobsBlocked) exhaustedLimits.push(`${usage.monthlyJobLimit} jobs`)
+
+  const limitLabel =
+    exhaustedLimits.length === 0
+      ? 'the included Free plan usage'
+      : exhaustedLimits.length === 1
+        ? exhaustedLimits[0]
+        : `${exhaustedLimits.slice(0, -1).join(', ')} and ${exhaustedLimits[exhaustedLimits.length - 1]}`
+
+  return {
+    signature: `${summary.currentPeriodEndsAt}:${clientsBlocked ? 'clients' : 'no-clients'}:${jobsBlocked ? 'jobs' : 'no-jobs'}`,
+    title: 'Free Plan Limit Reached',
+    message: `You have used all ${limitLabel} included with the Free plan. Your allowance resets on ${formatBillingResetDate(summary.currentPeriodEndsAt)}. Open billing to upgrade and keep creating records.`
+  }
+}
+
 function App() {
   return (
     <Router>
@@ -84,9 +171,19 @@ function App() {
 function AppContent() {
   const [session, setSession] = useState(loadSessionFromStorage)
   const [showLogoutMenu, setShowLogoutMenu] = useState(false)
+  const [usageLimitPrompt, setUsageLimitPrompt] = useState(null)
+  const usageLimitPromptSignatureRef = useRef('')
   const location = useLocation()
   const navigate = useNavigate()
-  const isLogin = location.pathname === '/'
+  const isMarketingPage = [
+    PUBLIC_PATHS.home,
+    PUBLIC_PATHS.features,
+    PUBLIC_PATHS.pricing
+  ].includes(location.pathname)
+  const isLogin = location.pathname === PUBLIC_PATHS.login || location.pathname === PUBLIC_PATHS.signup
+  const isJobCreationPage = location.pathname === APP_PATHS.newJob
+  const isStandalonePublicPage = STANDALONE_PUBLIC_PATHS.has(location.pathname)
+  const isPublicExperience = isMarketingPage || isLogin || isStandalonePublicPage
 
   const updateSessionFromLogin = useCallback((payload) => {
     const record = buildSessionRecord(payload)
@@ -96,7 +193,7 @@ function AppContent() {
   }, [])
 
   const currentUser = session?.user ?? null
-  const showWorkspaceNewJobAction = currentUser && location.pathname !== '/jobs/new'
+  const showWorkspaceNewJobAction = currentUser && location.pathname !== APP_PATHS.newJob
 
   const refreshAccessToken = useCallback(async () => {
     try {
@@ -131,15 +228,8 @@ function AppContent() {
   }, [session])
 
   const pageMeta = useMemo(() => {
-    if (isLogin) {
-      return {
-        title: 'Appointment Assistant',
-        description: 'A polished, dark workspace for managing jobs, clients, and follow-up notes.'
-      }
-    }
-
-    return PAGE_META[location.pathname] || PAGE_META['/calendar']
-  }, [isLogin, location.pathname])
+    return PAGE_META[location.pathname] || PAGE_META[APP_PATHS.dashboard]
+  }, [location.pathname])
 
   useEffect(() => {
     if (!session?.expiresAt) return undefined
@@ -215,8 +305,30 @@ function AppContent() {
 
     setSession(null)
     setShowLogoutMenu(false)
-    navigate('/')
+    navigate(PUBLIC_PATHS.home)
   }
+
+  const handleAccountDeleted = useCallback(() => {
+    setSession(null)
+    setShowLogoutMenu(false)
+    navigate(PUBLIC_PATHS.home)
+  }, [navigate])
+
+  const acknowledgeUsageLimitPrompt = useCallback((signature) => {
+    if (!currentUser || typeof window === 'undefined' || !signature) return
+
+    usageLimitPromptSignatureRef.current = signature
+    window.sessionStorage.setItem(getUsageLimitPromptStorageKey(currentUser.id), signature)
+  }, [currentUser])
+
+  const openBillingFromUsagePrompt = useCallback(() => {
+    if (usageLimitPrompt?.signature) {
+      acknowledgeUsageLimitPrompt(usageLimitPrompt.signature)
+    }
+
+    setUsageLimitPrompt(null)
+    navigate(APP_PATHS.billing)
+  }, [acknowledgeUsageLimitPrompt, navigate, usageLimitPrompt])
 
   const apiContextValue = useMemo(
     () => ({
@@ -239,17 +351,48 @@ function AppContent() {
     ]
   )
 
+  useEffect(() => {
+    if (!currentUser || !subscriptionSummary) {
+      setUsageLimitPrompt(null)
+      usageLimitPromptSignatureRef.current = ''
+      return
+    }
+
+    const prompt = getUsageLimitPromptDetails(subscriptionSummary)
+    if (!prompt) {
+      setUsageLimitPrompt(null)
+      return
+    }
+
+    if (typeof window === 'undefined') return
+
+    const storageKey = getUsageLimitPromptStorageKey(currentUser.id)
+    const seenSignature = window.sessionStorage.getItem(storageKey) || ''
+
+    if (location.pathname === APP_PATHS.billing) {
+      acknowledgeUsageLimitPrompt(prompt.signature)
+      setUsageLimitPrompt(null)
+      return
+    }
+
+    if (seenSignature === prompt.signature || usageLimitPromptSignatureRef.current === prompt.signature) {
+      return
+    }
+
+    setUsageLimitPrompt(prompt)
+  }, [acknowledgeUsageLimitPrompt, currentUser, location.pathname, subscriptionSummary])
+
   return (
-    <div className={`app-shell${isLogin ? ' app-shell--login' : ''}`}>
-      {!isLogin && (
-            <aside className="app-sidebar">
-              <div className="sidebar-brand-block">
-                <div className="sidebar-brand-mark">AA</div>
-                <div>
-                  <p className="sidebar-eyebrow">Appointment toolkit</p>
-                  <h1 className="sidebar-brand-title">Appointment Assistant</h1>
-                </div>
-              </div>
+    <div className={`app-shell${isPublicExperience ? ' app-shell--login' : ''}`}>
+      {!isPublicExperience && (
+        <aside className="app-sidebar">
+          <div className="sidebar-brand-block">
+            <div className="sidebar-brand-mark">AA</div>
+            <div>
+              <p className="sidebar-eyebrow">Appointment toolkit</p>
+              <h1 className="sidebar-brand-title">Appointment Assistant</h1>
+            </div>
+          </div>
 
           <nav className="sidebar-nav" aria-label="Primary navigation">
             {NAV_ITEMS.map((item) => (
@@ -272,8 +415,8 @@ function AppContent() {
       )}
 
       <main className="app-main">
-        {!isLogin && (
-          <header className="page-header">
+        {!isPublicExperience && (
+          <header className={`page-header${isJobCreationPage ? ' page-header--workflow' : ''}`}>
             <div className="page-header-content">
               <div className="page-header-main">
                 <p className="page-header-kicker">Workspace overview</p>
@@ -283,7 +426,7 @@ function AppContent() {
                   <button
                     type="button"
                     className="sidebar-primary-action page-header-primary-action"
-                    onClick={() => navigate('/jobs/new')}
+                    onClick={() => navigate(APP_PATHS.newJob)}
                   >
                     <span className="sidebar-primary-action-icon">+</span>
                     New Job
@@ -319,7 +462,7 @@ function AppContent() {
                   <button
                     type="button"
                     className="sidebar-secondary-action"
-                    onClick={() => navigate('/')}
+                    onClick={() => navigate(PUBLIC_PATHS.login)}
                   >
                     Return to login
                   </button>
@@ -328,7 +471,7 @@ function AppContent() {
                   <button
                     type="button"
                     className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
-                    onClick={() => navigate('/billing')}
+                    onClick={() => navigate(APP_PATHS.billing)}
                   >
                     <span className="sidebar-section-label">Plan</span>
                     <strong>{subscriptionSummary.planName}</strong>
@@ -346,19 +489,56 @@ function AppContent() {
           </header>
         )}
 
-        <section className={`page-content${isLogin ? ' page-content--login' : ''}`}>
+        <section
+          className={`page-content${isPublicExperience ? ' page-content--login' : ''}${isJobCreationPage ? ' page-content--workflow' : ''}`}
+        >
           <ApiContext.Provider value={apiContextValue}>
             <Routes>
-              <Route path="/" element={<LoginPage onLogin={updateSessionFromLogin} />} />
-              <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
-              <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
-              <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
-              <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
-              <Route path="/billing" element={<BillingPage />} />
+              <Route path="/" element={<LandingScreen currentUser={currentUser} />} />
+              <Route path={PUBLIC_PATHS.features} element={<FeaturesPage currentUser={currentUser} />} />
+              <Route path={PUBLIC_PATHS.pricing} element={<PricingPage currentUser={currentUser} />} />
+              <Route path={PUBLIC_PATHS.login} element={<LoginPage onLogin={updateSessionFromLogin} />} />
+              <Route path={PUBLIC_PATHS.signup} element={<LoginPage onLogin={updateSessionFromLogin} defaultMode="create" />} />
+              <Route path={APP_PATHS.home} element={<Navigate to={APP_PATHS.dashboard} replace />} />
+              <Route path={APP_PATHS.dashboard} element={<CalendarPage currentUser={currentUser} />} />
+              <Route path={APP_PATHS.calendar} element={<CalendarPage currentUser={currentUser} />} />
+              <Route path={APP_PATHS.newJob} element={<JobForm currentUser={currentUser} />} />
+              <Route path={APP_PATHS.jobs} element={<JobsList currentUser={currentUser} />} />
+              <Route path={APP_PATHS.clients} element={<ClientsList currentUser={currentUser} />} />
+              <Route path={APP_PATHS.billing} element={<BillingPage onAccountDeleted={handleAccountDeleted} />} />
+              <Route path="/dashboard" element={<Navigate to={APP_PATHS.dashboard} replace />} />
+              <Route path="/calendar" element={<Navigate to={APP_PATHS.calendar} replace />} />
+              <Route path="/jobs/new" element={<Navigate to={APP_PATHS.newJob} replace />} />
+              <Route path="/jobs" element={<Navigate to={APP_PATHS.jobs} replace />} />
+              <Route path="/clients" element={<Navigate to={APP_PATHS.clients} replace />} />
+              <Route path="/billing" element={<Navigate to={APP_PATHS.billing} replace />} />
+              <Route path={PUBLIC_PATHS.privacy} element={<PrivacyPage />} />
+              <Route path={PUBLIC_PATHS.support} element={<SupportPage />} />
+              <Route path={PUBLIC_PATHS.account} element={<AccountPage onAccountDeleted={handleAccountDeleted} />} />
             </Routes>
           </ApiContext.Provider>
         </section>
       </main>
+      {usageLimitPrompt ? (
+        <div className="comments-modal-backdrop" role="presentation">
+          <div className="comments-modal usage-limit-modal" role="dialog" aria-modal="true" aria-labelledby="usage-limit-modal-title">
+            <div className="comments-modal-header">
+              <p className="sidebar-section-label">Billing update</p>
+              <h3 id="usage-limit-modal-title">{usageLimitPrompt.title}</h3>
+              <p className="comments-modal-subtitle">{usageLimitPrompt.message}</p>
+            </div>
+            <div className="comments-modal-actions usage-limit-modal__actions">
+              <button
+                type="button"
+                className="comments-modal-button comments-modal-button--primary"
+                onClick={openBillingFromUsagePrompt}
+              >
+                Open billing
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

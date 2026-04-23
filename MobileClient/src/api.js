@@ -5,6 +5,15 @@ const normalizeApiBase = (value) => String(value || '').trim().replace(/\/+$/, '
 export const API_BASE = normalizeApiBase(
   process.env.EXPO_PUBLIC_API_BASE || 'https://appointmentassistant-production.up.railway.app'
 )
+export const APP_WEB_BASE = normalizeApiBase(
+  process.env.EXPO_PUBLIC_APP_WEB_URL || 'https://appointmentassistant.netlify.app'
+)
+export const SUPPORT_EMAIL = String(process.env.EXPO_PUBLIC_SUPPORT_EMAIL || '').trim()
+
+export const getPublicAppUrl = (path = '') => {
+  const normalizedPath = String(path || '').startsWith('/') ? String(path || '') : `/${String(path || '')}`
+  return `${APP_WEB_BASE}${normalizedPath}`
+}
 
 const SESSION_KEY = 'appointment-assistant-mobile:session'
 const JOB_DRAFT_KEY = 'appointment-assistant-mobile:job-draft'

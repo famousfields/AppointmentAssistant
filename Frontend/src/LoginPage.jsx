@@ -1,22 +1,30 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 
 import { API_BASE } from './api'
+import { APP_PATHS, PUBLIC_PATHS } from './appInfo'
 
-export default function LoginPage({ onLogin }) {
+export default function LoginPage({ onLogin, defaultMode = 'login' }) {
   const navigate = useNavigate()
-  const [formMode, setFormMode] = useState('login')
+  const location = useLocation()
+  const initialMode = new URLSearchParams(location.search).get('mode') === 'create' ? 'create' : defaultMode
+  const [formMode, setFormMode] = useState(initialMode)
   const [formData, setFormData] = useState({
-    username: '',
-    password: '',
+    displayName: '',
     email: '',
+    password: '',
     confirmPassword: ''
   })
   const [status, setStatus] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isCreateMode = formMode === 'create'
+
+  useEffect(() => {
+    setFormMode(initialMode)
+    setStatus(null)
+  }, [initialMode])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -48,7 +56,7 @@ export default function LoginPage({ onLogin }) {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            username: formData.username,
+            displayName: formData.displayName,
             password: formData.password,
             email: formData.email
           })
@@ -83,7 +91,8 @@ export default function LoginPage({ onLogin }) {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          usernameOrEmail: formData.username,
+          email: formData.email,
+          usernameOrEmail: formData.email,
           password: formData.password
         })
       })
@@ -99,8 +108,8 @@ export default function LoginPage({ onLogin }) {
         setStatus({ type: 'error', message: errorMessage })
       } else {
         const userPayload = payload.user || {
-          email: formData.username,
-          name: formData.username
+          email: formData.email,
+          name: formData.displayName || formData.email
         }
         setStatus({
           type: 'success',
@@ -110,7 +119,7 @@ export default function LoginPage({ onLogin }) {
           user: userPayload,
           accessToken: payload.accessToken
         })
-        navigate('/calendar')
+        navigate(APP_PATHS.dashboard)
       }
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Unable to reach the server' })
@@ -152,17 +161,31 @@ export default function LoginPage({ onLogin }) {
           </p>
         </div>
 
-        <label htmlFor="username">{isCreateMode ? 'Username' : 'Email or username'}</label>
-        <input
-          id="username"
-          name="username"
-          type="text"
-          value={formData.username}
-          onChange={handleChange}
-          required
-        />
-
         {isCreateMode && (
+          <>
+            <label htmlFor="displayName">Display name</label>
+            <input
+              id="displayName"
+              name="displayName"
+              type="text"
+              value={formData.displayName}
+              onChange={handleChange}
+              required
+            />
+
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+            />
+          </>
+        )}
+
+        {!isCreateMode && (
           <>
             <label htmlFor="email">Email</label>
             <input
@@ -212,6 +235,12 @@ export default function LoginPage({ onLogin }) {
 
         {status && <p className={`form-status form-status--${status.type}`}>{status.message}</p>}
         <p className="login-note">Use your account to access your client list, calendar, job history, and appointment updates.</p>
+        <div className="login-legal-links">
+          <a href={PUBLIC_PATHS.home}>Home</a>
+          <a href={PUBLIC_PATHS.privacy}>Privacy policy</a>
+          <a href={PUBLIC_PATHS.support}>Support</a>
+          <a href={PUBLIC_PATHS.account}>Account management</a>
+        </div>
       </form>
     </div>
   )

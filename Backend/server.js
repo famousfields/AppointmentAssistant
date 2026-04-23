@@ -172,6 +172,8 @@ const getRefreshCookieOptions = () => ({
   maxAgeSeconds: REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60
 });
 
+const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
+
 const validateRuntimeConfig = () => {
   const missing = [];
   if (!ACCESS_TOKEN_SECRET) missing.push("ACCESS_TOKEN_SECRET");
@@ -488,6 +490,47 @@ const getSubscriptionContextForUser = async (userId) => {
   };
 };
 
+const deleteUserWorkspaceData = async (userId) => {
+  const [clientRows] = await db.promise().query(
+    `
+      SELECT DISTINCT client_id
+      FROM Jobs
+      WHERE user_id = ? AND client_id IS NOT NULL
+    `,
+    [userId]
+  );
+  const clientIds = clientRows.map((row) => Number(row.client_id)).filter(Boolean);
+
+  await db.promise().query("START TRANSACTION");
+  try {
+    await db.promise().query("DELETE FROM refresh_tokens WHERE user_id = ?", [userId]);
+    await db.promise().query("DELETE FROM account_subscriptions WHERE user_id = ?", [userId]);
+    await db.promise().query("DELETE FROM job_types WHERE user_id = ?", [userId]);
+    await db.promise().query("DELETE FROM Jobs WHERE user_id = ?", [userId]);
+
+    if (clientIds.length > 0) {
+      await db.promise().query(
+        `
+          DELETE FROM Clients
+          WHERE id IN (?)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM Jobs
+              WHERE Jobs.client_id = Clients.id
+            )
+        `,
+        [clientIds]
+      );
+    }
+
+    await db.promise().query("DELETE FROM users WHERE id = ?", [userId]);
+    await db.promise().query("COMMIT");
+  } catch (error) {
+    await db.promise().query("ROLLBACK");
+    throw error;
+  }
+};
+
 const buildPlanLimitMessage = (summary, { createsClient = false, createsJob = false } = {}) => {
   const messages = [];
 
@@ -802,6 +845,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("/users", cors(corsOptions));
+app.options("/users/me", cors(corsOptions));
 app.options("/auth/login", cors(corsOptions));
 app.options("/auth/refresh", cors(corsOptions));
 app.options("/auth/logout", cors(corsOptions));
@@ -851,9 +895,25 @@ app.post(
   "/users",
   authLimiter,
   [
-    body("username").trim().isLength({ min: 3 }).withMessage("Name must be at least 3 characters"),
-    body("email").isEmail().withMessage("Valid email is required"),
-    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters")
+    body("displayName")
+      .optional({ values: "falsy" })
+      .trim()
+      .isLength({ min: 3 })
+      .withMessage("Display name must be at least 3 characters"),
+    body("username")
+      .optional({ values: "falsy" })
+      .trim()
+      .isLength({ min: 3 })
+      .withMessage("Name must be at least 3 characters"),
+    body("email").customSanitizer(normalizeEmailAddress).isEmail().withMessage("Valid email is required"),
+    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters"),
+    body().custom((value) => {
+      const displayName = String(value?.displayName || value?.username || "").trim();
+      if (displayName.length < 3) {
+        throw new Error("Display name must be at least 3 characters");
+      }
+      return true;
+    })
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -861,11 +921,13 @@ app.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { username, email, password } = req.body;
+    const username = String(req.body.displayName || req.body.username || "").trim();
+    const email = normalizeEmailAddress(req.body.email);
+    const { password } = req.body;
 
     try {
       const [existingUsers] = await db.promise().query(
-        "SELECT id FROM users WHERE name = ? OR email = ? LIMIT 1",
+        "SELECT id FROM users WHERE name = ? OR LOWER(email) = ? LIMIT 1",
         [username, email]
       );
 
@@ -897,19 +959,37 @@ app.post(
   "/auth/login",
   authLimiter,
   [
-    body("usernameOrEmail").trim().notEmpty().withMessage("Username or email is required"),
+    body("email")
+      .optional({ values: "falsy" })
+      .customSanitizer(normalizeEmailAddress)
+      .isEmail()
+      .withMessage("Valid email is required"),
+    body("usernameOrEmail")
+      .optional({ values: "falsy" })
+      .trim(),
+    body().custom((value) => {
+      const hasEmail = normalizeEmailAddress(value?.email).length > 0;
+      const hasUsernameOrEmail = String(value?.usernameOrEmail || "").trim().length > 0;
+      if (!hasEmail && !hasUsernameOrEmail) {
+        throw new Error("Email is required");
+      }
+      return true;
+    }),
     body("password").notEmpty().withMessage("Password is required")
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { usernameOrEmail, password } = req.body;
+    const email = normalizeEmailAddress(req.body.email);
+    const usernameOrEmail = String(req.body.usernameOrEmail || "").trim();
+    const password = String(req.body.password || "");
+    const loginIdentifier = email || usernameOrEmail;
 
     try {
       const [rows] = await db.promise().query(
-        "SELECT id, name, email, password FROM users WHERE name = ? OR email = ? LIMIT 1",
-        [usernameOrEmail, usernameOrEmail]
+        "SELECT id, name, email, password FROM users WHERE name = ? OR LOWER(email) = ? LIMIT 1",
+        [loginIdentifier, loginIdentifier]
       );
 
       const user = rows[0];
@@ -999,6 +1079,69 @@ app.post("/auth/logout", async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+app.delete(
+  "/users/me",
+  requireAuth,
+  [
+    body("password").isLength({ min: 8 }).withMessage("Current password is required"),
+    body("confirmText")
+      .custom((value) => String(value || "").trim().toUpperCase() === "DELETE")
+      .withMessage('Type DELETE to confirm account removal')
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      const [[user]] = await db.promise().query(
+        "SELECT id, password FROM users WHERE id = ? LIMIT 1",
+        [req.user.id]
+      );
+
+      if (!user) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+
+      const passwordMatches = await bcrypt.compare(req.body.password, user.password);
+      if (!passwordMatches) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      const subscriptionContext = await getSubscriptionContextForUser(req.user.id);
+      if (subscriptionContext.summary.planCode !== "free" && isStripeReady()) {
+        const customerId = subscriptionContext.row?.stripe_customer_id || null;
+        if (customerId) {
+          const portalSession = await createPortalSession({
+            customerId,
+            returnUrl: STRIPE_CONFIG.portalReturnUrl || STRIPE_CONFIG.successUrl || STRIPE_CONFIG.cancelUrl
+          });
+
+          return res.status(409).json({
+            error: "Cancel your paid subscription in Stripe before deleting this account.",
+            code: "ACTIVE_SUBSCRIPTION_REQUIRES_CANCELLATION",
+            portalUrl: portalSession.url,
+            portalSessionId: portalSession.id,
+            subscription: subscriptionContext.summary
+          });
+        }
+      }
+
+      await deleteUserWorkspaceData(req.user.id);
+      res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
+      return res.json({ message: "Your account and workspace data were deleted." });
+    } catch (error) {
+      console.error("Error deleting account:", error);
+      const message =
+        error.code === "ER_NO_SUCH_TABLE"
+          ? "Account data tables are missing. Run the backend migrations."
+          : error.message || error.stripe?.error?.message || "Unable to delete the account";
+      return res.status(error.statusCode || 500).json({ error: message });
+    }
+  }
+);
 
 app.post(
   "/jobs",

@@ -14,6 +14,7 @@ import { parseDateValue } from './dateUtils'
 import GoogleMapsLink from './GoogleMapsLink'
 import JobTypeManager from './JobTypeManager'
 import { FlowStepper, SectionCard, StatusChip } from './productUi'
+import { APP_PATHS } from './appInfo'
 
 const EMPTY_FORM_DATA = {
   name: '',
@@ -292,7 +293,7 @@ export default function JobForm({ currentUser }) {
         await refreshJobTypes()
         await refreshSubscription()
         redirectTimer.current = setTimeout(() => {
-          navigate('/calendar')
+          navigate(APP_PATHS.dashboard)
         }, 1000)
       } else {
         const errorMessage =
@@ -424,7 +425,7 @@ export default function JobForm({ currentUser }) {
                 <button
                   type="button"
                   className="comments-button comments-button--ghost"
-                  onClick={() => navigate('/billing')}
+                  onClick={() => navigate(APP_PATHS.billing)}
                 >
                   View billing
                 </button>

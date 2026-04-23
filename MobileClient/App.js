@@ -1,9 +1,10 @@
 import { StatusBar } from 'expo-status-bar'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   Linking,
   KeyboardAvoidingView,
   Modal,
@@ -18,13 +19,16 @@ import {
 } from 'react-native'
 import {
   API_BASE,
+  APP_WEB_BASE,
   apiFetch,
   buildSessionRecord,
   clearJobDraft,
+  getPublicAppUrl,
   loadJobDraft,
   loadStoredSession,
   persistJobDraft,
-  persistSession
+  persistSession,
+  SUPPORT_EMAIL
 } from './src/api'
 import GoogleMapsLink from './src/GoogleMapsLink'
 import { colors, commonStyles } from './src/theme'
@@ -45,6 +49,9 @@ const CALENDAR_VIEWS = [
   { key: 'year', label: 'Yearly' }
 ]
 const PHONE_EXAMPLE = '(555) 123-4567'
+const KEYBOARD_SCROLL_DELAY_MS = Platform.OS === 'ios' ? 80 : 140
+const AUTH_KEYBOARD_EXTRA_OFFSET = 96
+const WORKSPACE_KEYBOARD_EXTRA_OFFSET = 120
 const DEFAULT_JOB_DURATION_MINUTES = 60
 const DAY_TIMELINE_DEFAULT_START_HOUR = 8
 const DAY_TIMELINE_DEFAULT_END_HOUR = 18
@@ -149,6 +156,12 @@ const EMPTY_JOB_FORM = {
   startTime: '',
   payment: '',
   comments: ''
+}
+
+const PUBLIC_PATHS = {
+  privacy: '/privacy',
+  support: '/support',
+  account: '/account'
 }
 
 const parseDateValue = (value) => {
@@ -395,6 +408,39 @@ const formatBillingResetDate = (value) => {
     day: 'numeric',
     year: 'numeric'
   })
+}
+
+const getUsageLimitPromptDetails = (summary) => {
+  if (!summary || summary.planCode !== 'free' || !summary.entitlements?.creationBlocked) {
+    return null
+  }
+
+  const usage = summary.usage || {}
+  const clientsBlocked =
+    usage.monthlyClientLimit !== null &&
+    usage.monthlyClientLimit !== undefined &&
+    Number(usage.monthlyClientCreations ?? 0) >= Number(usage.monthlyClientLimit)
+  const jobsBlocked =
+    usage.monthlyJobLimit !== null &&
+    usage.monthlyJobLimit !== undefined &&
+    Number(usage.monthlyJobCreations ?? 0) >= Number(usage.monthlyJobLimit)
+
+  const exhaustedLimits = []
+  if (clientsBlocked) exhaustedLimits.push(`${usage.monthlyClientLimit} clients`)
+  if (jobsBlocked) exhaustedLimits.push(`${usage.monthlyJobLimit} jobs`)
+
+  const limitLabel =
+    exhaustedLimits.length === 0
+      ? 'the included Free plan usage'
+      : exhaustedLimits.length === 1
+        ? exhaustedLimits[0]
+        : `${exhaustedLimits.slice(0, -1).join(', ')} and ${exhaustedLimits[exhaustedLimits.length - 1]}`
+
+  return {
+    signature: `${summary.currentPeriodEndsAt}:${clientsBlocked ? 'clients' : 'no-clients'}:${jobsBlocked ? 'jobs' : 'no-jobs'}`,
+    title: 'Free Plan Limit Reached',
+    message: `You have used all ${limitLabel} included with the Free plan. Your allowance resets on ${formatBillingResetDate(summary.currentPeriodEndsAt)}.`
+  }
 }
 
 const getContrastTextColor = (backgroundColor) => {
@@ -662,8 +708,16 @@ const applyClientDetails = (client) => ({
   address: client.address || ''
 })
 
+const getApiErrorMessage = (payload, fallback) =>
+  payload?.error || payload?.message || payload?.errors?.[0]?.msg || fallback
+
 
 export default function App() {
+  const authScrollRef = useRef(null)
+  const workspaceScrollRef = useRef(null)
+  const focusedInputRef = useRef({ area: null, target: null })
+  const keyboardScrollTimeoutRef = useRef(null)
+  const usageLimitPromptSignatureRef = useRef('')
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState(null)
   const [apiHealth, setApiHealth] = useState({ status: 'checking', message: 'Checking backend...' })
@@ -674,7 +728,8 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedClient, setSelectedClient] = useState(null)
   const [authMode, setAuthMode] = useState('login')
-  const [authForm, setAuthForm] = useState({ username: '', password: '', email: '', confirmPassword: '' })
+  const [authScreenMode, setAuthScreenMode] = useState(null)
+  const [authForm, setAuthForm] = useState({ displayName: '', email: '', password: '', confirmPassword: '' })
   const [authErrors, setAuthErrors] = useState({})
   const [authStatus, setAuthStatus] = useState(null)
   const [authSubmitting, setAuthSubmitting] = useState(false)
@@ -690,6 +745,9 @@ export default function App() {
   const [billingError, setBillingError] = useState('')
   const [billingStatus, setBillingStatus] = useState('')
   const [billingSavingPlanCode, setBillingSavingPlanCode] = useState('')
+  const [accountDeletionForm, setAccountDeletionForm] = useState({ password: '', confirmText: '' })
+  const [accountDeletionStatus, setAccountDeletionStatus] = useState('')
+  const [accountDeletionSubmitting, setAccountDeletionSubmitting] = useState(false)
   const [jobTypeDraft, setJobTypeDraft] = useState({ name: '', color: JOB_TYPE_COLOR_PRESETS[0] })
   const [jobTypeEditingId, setJobTypeEditingId] = useState(null)
   const [jobTypeFormError, setJobTypeFormError] = useState('')
@@ -700,6 +758,71 @@ export default function App() {
   const [calendarView, setCalendarView] = useState('day')
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => startOfDay(new Date()))
   const [calendarJobTypesVisible, setCalendarJobTypesVisible] = useState(false)
+
+  const scrollFocusedInputIntoView = useCallback((area, target) => {
+    if (!target) return
+
+    const scrollRef = area === 'auth' ? authScrollRef.current : workspaceScrollRef.current
+    if (!scrollRef) return
+
+    const responder = typeof scrollRef.getScrollResponder === 'function' ? scrollRef.getScrollResponder() : scrollRef
+    if (typeof responder?.scrollResponderScrollNativeHandleToKeyboard !== 'function') return
+
+    requestAnimationFrame(() => {
+      responder.scrollResponderScrollNativeHandleToKeyboard(
+        target,
+        area === 'auth' ? AUTH_KEYBOARD_EXTRA_OFFSET : WORKSPACE_KEYBOARD_EXTRA_OFFSET,
+        true
+      )
+    })
+  }, [])
+
+  const scheduleScrollToFocusedInput = useCallback((area, target) => {
+    if (!target) return
+
+    if (keyboardScrollTimeoutRef.current) {
+      clearTimeout(keyboardScrollTimeoutRef.current)
+    }
+
+    keyboardScrollTimeoutRef.current = setTimeout(() => {
+      scrollFocusedInputIntoView(area, target)
+      keyboardScrollTimeoutRef.current = null
+    }, KEYBOARD_SCROLL_DELAY_MS)
+  }, [scrollFocusedInputIntoView])
+
+  const registerFocusedInput = useCallback((area, event) => {
+    const target = event?.target ?? event?.nativeEvent?.target
+    focusedInputRef.current = { area, target }
+    scheduleScrollToFocusedInput(area, target)
+  }, [scheduleScrollToFocusedInput])
+
+  const handleAuthInputFocus = useCallback((event) => {
+    registerFocusedInput('auth', event)
+  }, [registerFocusedInput])
+
+  const handleWorkspaceInputFocus = useCallback((event) => {
+    registerFocusedInput('workspace', event)
+  }, [registerFocusedInput])
+
+  const openBillingLimitPrompt = useCallback((summary) => {
+    const prompt = getUsageLimitPromptDetails(summary)
+    if (!prompt) return
+
+    if (usageLimitPromptSignatureRef.current === prompt.signature) return
+    usageLimitPromptSignatureRef.current = prompt.signature
+
+    Alert.alert(
+      prompt.title,
+      `${prompt.message} Open billing to upgrade and keep creating records.`,
+      [
+        {
+          text: 'Open billing',
+          onPress: () => setActiveTab('billing')
+        }
+      ],
+      { cancelable: false }
+    )
+  }, [])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -750,6 +873,49 @@ export default function App() {
   useEffect(() => {
     persistJobDraft(jobForm)
   }, [jobForm])
+
+  useEffect(() => {
+    const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const keyboardShowSubscription = Keyboard.addListener(keyboardShowEvent, () => {
+      const { area, target } = focusedInputRef.current
+      if (area && target) {
+        scheduleScrollToFocusedInput(area, target)
+      }
+    })
+
+    return () => {
+      keyboardShowSubscription.remove()
+      if (keyboardScrollTimeoutRef.current) {
+        clearTimeout(keyboardScrollTimeoutRef.current)
+      }
+    }
+  }, [scheduleScrollToFocusedInput])
+
+  useEffect(() => {
+    if (!session) {
+      usageLimitPromptSignatureRef.current = ''
+    }
+  }, [session])
+
+  useEffect(() => {
+    const prompt = getUsageLimitPromptDetails(billingSummary)
+    if (!prompt) return
+
+    if (activeTab === 'billing') {
+      usageLimitPromptSignatureRef.current = prompt.signature
+      return
+    }
+
+    openBillingLimitPrompt(billingSummary)
+  }, [activeTab, billingSummary, openBillingLimitPrompt])
+
+  useEffect(() => {
+    if (!session) {
+      setAccountDeletionForm({ password: '', confirmText: '' })
+      setAccountDeletionStatus('')
+      setAccountDeletionSubmitting(false)
+    }
+  }, [session])
 
   useEffect(() => {
     if (!session) {
@@ -1197,20 +1363,20 @@ export default function App() {
     const trimmed = String(value || '').trim()
 
     switch (name) {
-      case 'username':
+      case 'email':
         if (!trimmed) {
           return mode === 'create'
-            ? 'Choose a username before creating your account.'
-            : 'Enter your email or username to sign in.'
+            ? 'Enter an email address for the new account.'
+            : 'Enter the email address for your account.'
         }
-        if (mode === 'create' && trimmed.length < 3) {
-          return 'Username must be at least 3 characters long.'
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? '' : 'Enter a valid email address.'
+      case 'displayName':
+        if (mode !== 'create') return ''
+        if (!trimmed) return 'Choose a display name before creating your account.'
+        if (trimmed.length < 3) {
+          return 'Display name must be at least 3 characters long.'
         }
         return ''
-      case 'email':
-        if (mode !== 'create') return ''
-        if (!trimmed) return 'Enter an email address for the new account.'
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? '' : 'Enter a valid email address.'
       case 'password':
         if (!value) {
           return mode === 'create'
@@ -1234,11 +1400,11 @@ export default function App() {
     const normalized = String(message || '').toLowerCase()
 
     if (normalized.includes('invalid credentials')) {
-      return 'That email, username, or password did not match our records.'
+      return 'That email or password did not match our records.'
     }
     if (normalized.includes('duplicate') || normalized.includes('already') || normalized.includes('taken')) {
       return mode === 'create'
-        ? 'That username or email is already in use. Try a different one or sign in instead.'
+        ? 'That email address is already in use. Try signing in instead.'
         : 'That account already exists. Try signing in.'
     }
     if (normalized.includes('validation')) {
@@ -1269,6 +1435,20 @@ export default function App() {
     return 'We could not save this appointment. Review the details and try again.'
   }
 
+  const openAuthScreen = (mode) => {
+    setAuthMode(mode)
+    setAuthScreenMode(mode)
+    setAuthErrors({})
+    setAuthStatus(null)
+  }
+
+  const closeAuthScreen = () => {
+    if (authSubmitting) return
+    setAuthScreenMode(null)
+    setAuthErrors({})
+    setAuthStatus(null)
+  }
+
   const submitAuth = async () => {
     const isCreate = authMode === 'create'
     const nextAuthErrors = Object.keys(authForm).reduce((accumulator, key) => {
@@ -1291,7 +1471,7 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username: authForm.username,
+            displayName: authForm.displayName,
             email: authForm.email,
             password: authForm.password
           })
@@ -1299,14 +1479,17 @@ export default function App() {
         const payload = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to create account')
         setAuthMode('login')
+        setAuthScreenMode('login')
+        setAuthForm((current) => ({ ...current, password: '', confirmPassword: '' }))
         setAuthErrors({})
-        setAuthStatus({ type: 'success', message: payload.message || 'Account created' })
+        setAuthStatus({ type: 'success', message: payload.message || 'Account created. Log in to continue.' })
       } else {
         const response = await fetch(`${API_BASE}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            usernameOrEmail: authForm.username,
+            email: authForm.email,
+            usernameOrEmail: authForm.email,
             password: authForm.password
           })
         })
@@ -1347,6 +1530,7 @@ export default function App() {
         type: 'error',
         message: `This workspace has reached its monthly free-tier limit. Upgrade or wait for the reset on ${formatBillingResetDate(billingSummary?.currentPeriodEndsAt)}.`
       })
+      openBillingLimitPrompt(billingSummary)
       return
     }
 
@@ -1391,6 +1575,66 @@ export default function App() {
       // Ignore logout cleanup failures.
     }
     setSession(null)
+  }
+
+  const openPublicPage = async (path) => {
+    const url = getPublicAppUrl(path)
+    try {
+      await Linking.openURL(url)
+    } catch {
+      Alert.alert('Unable to open link', `Try opening ${url} in your browser.`)
+    }
+  }
+
+  const openSupportContact = async () => {
+    if (!SUPPORT_EMAIL) {
+      await openPublicPage(PUBLIC_PATHS.support)
+      return
+    }
+
+    const supportUrl = `mailto:${SUPPORT_EMAIL}`
+    try {
+      await Linking.openURL(supportUrl)
+    } catch {
+      await openPublicPage(PUBLIC_PATHS.support)
+    }
+  }
+
+  const submitAccountDeletion = async () => {
+    if (!session) return
+
+    setAccountDeletionSubmitting(true)
+    setAccountDeletionStatus('')
+    try {
+      const response = await apiFetch('/users/me', {
+        method: 'DELETE',
+        body: JSON.stringify(accountDeletionForm),
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        onSessionChange: setSession
+      })
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        if (payload?.portalUrl) {
+          setAccountDeletionStatus(payload.error || 'Open Stripe to cancel your subscription before deleting the account.')
+          await Linking.openURL(payload.portalUrl)
+          return
+        }
+
+        throw new Error(getApiErrorMessage(payload, 'Unable to delete your account right now.'))
+      }
+
+      setAccountDeletionForm({ password: '', confirmText: '' })
+      setAccountDeletionStatus(payload.message || 'Your account and workspace data were deleted.')
+      setActiveTab('calendar')
+      Alert.alert('Account deleted', payload.message || 'Your account and workspace data were deleted.')
+      setSession(null)
+    } catch (error) {
+      setAccountDeletionStatus(error.message || 'Unable to delete your account right now.')
+    } finally {
+      setAccountDeletionSubmitting(false)
+    }
   }
 
   const saveJobUpdates = async (jobId, updates) => {
@@ -1548,6 +1792,17 @@ export default function App() {
     )
   }
 
+  const renderCalendarLegend = () => (
+    <View style={styles.calendarLegend}>
+      {jobTypeOptions.map((jobType) => (
+        <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
+          <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
+          <Text style={styles.calendarLegendText}>{jobType.name}</Text>
+        </View>
+      ))}
+    </View>
+  )
+
   const renderCalendarContent = () => {
     if (calendarView === 'day') {
       const dayJobs = jobsByDate.get(toDateKey(calendarAnchorDate)) || []
@@ -1558,11 +1813,27 @@ export default function App() {
       return (
         <>
           <View style={commonStyles.panel}>
-            <Text style={commonStyles.heading3}>Appointments for the day</Text>
+            <View style={styles.calendarDayHeader}>
+              <Text style={commonStyles.heading3}>Appointments for the day</Text>
+              <Pressable
+                style={[styles.calendarInlineToggle, calendarJobTypesVisible ? styles.calendarInlineToggleActive : null]}
+                onPress={() => setCalendarJobTypesVisible((current) => !current)}
+              >
+                <Text style={styles.calendarInlineToggleText}>
+                  {calendarJobTypesVisible ? 'Hide Job Types' : 'Job Types'}
+                </Text>
+              </Pressable>
+            </View>
             <View style={styles.calendarDaySummaryRow}>
               <Text style={commonStyles.text}>{dayJobs.length} scheduled job{dayJobs.length === 1 ? '' : 's'}</Text>
               <Text style={styles.calendarGrossIncomeText}>Gross today: {formatCurrency(totalGrossIncomeToday)}</Text>
             </View>
+            <View style={styles.calendarDayActionRow}>
+              <Chip label="Previous" onPress={() => stepCalendar(-1)} />
+              <Chip label="Today" active onPress={jumpCalendarToToday} />
+              <Chip label="Next" onPress={() => stepCalendar(1)} />
+            </View>
+            {calendarJobTypesVisible ? <View style={styles.calendarDayLegendWrap}>{renderCalendarLegend()}</View> : null}
             {dayJobs.length === 0 ? (
               <View style={styles.calendarEmptyState}>
                 <Text style={commonStyles.text}>No jobs are scheduled for this day.</Text>
@@ -1787,66 +2058,113 @@ export default function App() {
 
   if (!session) {
     const isCreate = authMode === 'create'
+    const authScreenActive = Boolean(authScreenMode)
+    const authHealthMessage = apiHealth.status === 'success' ? 'Backend connected and ready.' : apiHealth.message
     return (
-      <SafeAreaView style={commonStyles.screen}>
+      <SafeAreaView style={[commonStyles.screen, styles.authScreen]}>
         <StatusBar style="light" />
         <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
           <ScrollView
-            contentContainerStyle={commonStyles.content}
+            ref={authScrollRef}
+            contentContainerStyle={styles.authScrollContent}
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
           >
-            <Panel title="Appointment Assistant" subtitle="Appointment toolkit">
-              <Text style={commonStyles.text}>
-                Manage client appointments, track job details, and keep your schedule organized from one mobile workspace.
-              </Text>
-              <Text style={apiHealth.status === 'error' ? commonStyles.errorText : apiHealth.status === 'success' ? commonStyles.successText : commonStyles.text}>
-                {apiHealth.message}
-              </Text>
-            </Panel>
-            <View style={commonStyles.panel}>
-              <View style={styles.tabs}>
-                <Tab active={!isCreate} label="Login" onPress={() => {
-                  setAuthMode('login')
-                  setAuthErrors({})
-                  setAuthStatus(null)
-                }} />
-                <Tab active={isCreate} label="Create account" onPress={() => {
-                  setAuthMode('create')
-                  setAuthErrors({})
-                  setAuthStatus(null)
-                }} />
+            <View style={styles.authBackdrop}>
+              <View style={styles.authGlowTop} />
+              <View style={styles.authGlowBottom} />
+              <View style={styles.authGrid} />
+              <View style={styles.authHero}>
+                <Text style={styles.authEyebrow}>Mobile scheduling for service teams</Text>
+                <View style={styles.authMonogram}>
+                  <Text style={styles.authMonogramText}>AA</Text>
+                </View>
+                <Text style={styles.authWordmarkPrimary}>APPOINTMENT</Text>
+                <Text style={styles.authWordmarkAccent}>ASSISTANT</Text>
+                <Text style={styles.authHeroTitle}>Manage bookings, clients, and calendar updates from one workspace.</Text>
+                <Text style={apiHealth.status === 'error' ? styles.authHeroStatusError : styles.authHeroStatus}>
+                  {authHealthMessage}
+                </Text>
               </View>
-              <FormField label={isCreate ? 'Username' : 'Email or username'} value={authForm.username} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, username: value }))
-                setAuthErrors((current) => ({ ...current, username: '' }))
-                setAuthStatus(null)
-              }} error={authErrors.username} />
-              {isCreate ? <FormField label="Email" value={authForm.email} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, email: value }))
-                setAuthErrors((current) => ({ ...current, email: '' }))
-                setAuthStatus(null)
-              }} error={authErrors.email} /> : null}
-              <FormField label="Password" value={authForm.password} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, password: value }))
-                setAuthErrors((current) => ({
-                  ...current,
-                  password: '',
-                  confirmPassword: authMode === 'create' && authForm.confirmPassword && authForm.confirmPassword !== value
-                    ? 'The password confirmation does not match.'
-                    : ''
-                }))
-                setAuthStatus(null)
-              }} error={authErrors.password} secureTextEntry />
-              {isCreate ? <FormField label="Confirm password" value={authForm.confirmPassword} onChangeText={(value) => {
-                setAuthForm((current) => ({ ...current, confirmPassword: value }))
-                setAuthErrors((current) => ({ ...current, confirmPassword: '' }))
-                setAuthStatus(null)
-              }} error={authErrors.confirmPassword} secureTextEntry /> : null}
-              <Pressable style={[commonStyles.button, commonStyles.buttonPrimary]} onPress={submitAuth}>
-                <Text style={commonStyles.buttonText}>{authSubmitting ? 'Working...' : isCreate ? 'Create account' : 'Sign in'}</Text>
-              </Pressable>
-              {authStatus ? <Text style={authStatus.type === 'error' ? commonStyles.errorText : commonStyles.successText}>{authStatus.message}</Text> : null}
+              <View style={styles.authSheet}>
+                {authScreenActive ? (
+                  <View style={styles.authFormWrap}>
+                    <View style={styles.authFormHeader}>
+                      <View style={styles.authFormCopy}>
+                        <Text style={styles.authFormEyebrow}>{isCreate ? 'Create your workspace' : 'Welcome back'}</Text>
+                        <Text style={styles.authFormTitle}>{isCreate ? 'Sign Up Free' : 'Log In'}</Text>
+                        <Text style={styles.authFormText}>
+                          {isCreate
+                            ? 'Start with your email and create an account when you are ready.'
+                            : 'Enter your account details to get back into your schedule.'}
+                        </Text>
+                      </View>
+                      <Pressable onPress={closeAuthScreen}>
+                        <Text style={styles.authBackLink}>Back</Text>
+                      </Pressable>
+                    </View>
+                    {isCreate ? <FormField label="Display name" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.displayName} onFocus={handleAuthInputFocus} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, displayName: value }))
+                      setAuthErrors((current) => ({ ...current, displayName: '' }))
+                      setAuthStatus(null)
+                    }} error={authErrors.displayName} /> : null}
+                    <FormField label="Email" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.email} onFocus={handleAuthInputFocus} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, email: value }))
+                      setAuthErrors((current) => ({ ...current, email: '' }))
+                      setAuthStatus(null)
+                    }} error={authErrors.email} />
+                    <FormField label="Password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.password} onFocus={handleAuthInputFocus} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, password: value }))
+                      setAuthErrors((current) => ({
+                        ...current,
+                        password: '',
+                        confirmPassword: authMode === 'create' && authForm.confirmPassword && authForm.confirmPassword !== value
+                          ? 'The password confirmation does not match.'
+                          : ''
+                      }))
+                      setAuthStatus(null)
+                    }} error={authErrors.password} secureTextEntry />
+                    {isCreate ? <FormField label="Confirm password" labelStyle={styles.authInputLabel} inputStyle={styles.authInput} value={authForm.confirmPassword} onFocus={handleAuthInputFocus} onChangeText={(value) => {
+                      setAuthForm((current) => ({ ...current, confirmPassword: value }))
+                      setAuthErrors((current) => ({ ...current, confirmPassword: '' }))
+                      setAuthStatus(null)
+                    }} error={authErrors.confirmPassword} secureTextEntry /> : null}
+                    <Pressable style={[commonStyles.button, styles.authPrimaryButton]} onPress={submitAuth}>
+                      <View style={styles.authPrimaryButtonGlow} />
+                      <View style={styles.authPrimaryButtonGlowSecondary} />
+                      <Text style={styles.authPrimaryButtonText}>{authSubmitting ? 'Working...' : isCreate ? 'Sign Up Free' : 'Log In'}</Text>
+                    </Pressable>
+                    {authStatus ? <Text style={authStatus.type === 'error' ? commonStyles.errorText : commonStyles.successText}>{authStatus.message}</Text> : null}
+                    <Pressable onPress={() => openAuthScreen(isCreate ? 'login' : 'create')}>
+                      <Text style={styles.authModeSwitch}>
+                        {isCreate ? 'Already have an account? Log In' : 'Need an account? Sign Up Free'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.authCtaStack}>
+                    <Pressable style={[commonStyles.button, styles.authPrimaryButton]} onPress={() => openAuthScreen('create')}>
+                      <View style={styles.authPrimaryButtonGlow} />
+                      <View style={styles.authPrimaryButtonGlowSecondary} />
+                      <Text style={styles.authPrimaryButtonText}>Sign Up Free</Text>
+                    </Pressable>
+                    <Pressable style={[commonStyles.button, styles.authSecondaryButton]} onPress={() => openAuthScreen('login')}>
+                      <Text style={styles.authSecondaryButtonText}>Log In</Text>
+                    </Pressable>
+                  </View>
+                )}
+                <View style={styles.inlineLinkRow}>
+                  <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.privacy)}>
+                    <Text style={styles.authInlineLinkText}>Privacy policy</Text>
+                  </Pressable>
+                  <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.support)}>
+                    <Text style={styles.authInlineLinkText}>Support</Text>
+                  </Pressable>
+                  <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.account)}>
+                    <Text style={styles.authInlineLinkText}>Account page</Text>
+                  </Pressable>
+                </View>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -1859,6 +2177,7 @@ export default function App() {
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
         <ScrollView
+          ref={workspaceScrollRef}
           contentContainerStyle={commonStyles.content}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
@@ -1918,6 +2237,11 @@ export default function App() {
               </Panel>
               {jobsLoading ? <Panel><Text style={commonStyles.text}>Loading jobs...</Text></Panel> : null}
               {jobsError ? <Panel><Text style={commonStyles.errorText}>{jobsError}</Text></Panel> : null}
+              {!jobsLoading && !jobsError && jobs.length === 0 ? (
+                <Panel>
+                  <Text style={commonStyles.text}>Create a job to view jobs</Text>
+                </Panel>
+              ) : null}
               {!jobsLoading && !jobsError ? jobsGroupedByDate.map((group) => (
                 <Panel key={group.dateKey} title={group.title} subtitle={`${group.jobs.length} job${group.jobs.length === 1 ? '' : 's'}`}>
                   {group.jobs.map((job) => (
@@ -1950,12 +2274,12 @@ export default function App() {
                 >
                   <Text style={commonStyles.buttonText}>Use Existing Client</Text>
                 </Pressable>
-                <FormField label="Client name" value={jobForm.name} onChangeText={(value) => {
+                <FormField label="Client name" value={jobForm.name} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, name: value }))
                   setJobErrors((current) => ({ ...current, name: '' }))
                   setJobStatus(null)
                 }} error={jobErrors.name} placeholder="Jane Smith" helperText="Enter a new client name or adjust the selected client details here." />
-                <FormField label="Phone" value={jobForm.phone} onChangeText={(value) => {
+                <FormField label="Phone" value={jobForm.phone} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, phone: normalizePhoneDigits(value) }))
                   setJobErrors((current) => ({ ...current, phone: '' }))
                   setJobStatus(null)
@@ -1975,7 +2299,7 @@ export default function App() {
                   onCreateNew={() => setJobSuggestionField(null)}
                   createLabel="Keep this as a new client"
                 />
-                <FormField label="Service address" value={jobForm.address} onChangeText={(value) => {
+                <FormField label="Service address" value={jobForm.address} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, address: value }))
                   setJobErrors((current) => ({ ...current, address: '' }))
                   setJobStatus(null)
@@ -2007,7 +2331,7 @@ export default function App() {
                   setJobErrors((current) => ({ ...current, jobType: '' }))
                   setJobStatus(null)
                 }} error={jobErrors.jobType} options={jobTypeOptions.map((jobType) => jobType.name)} />
-                <CurrencyField label="Quoted amount" value={jobForm.payment} onChangeText={(value) => {
+                <CurrencyField label="Quoted amount" value={jobForm.payment} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, payment: value }))
                   setJobErrors((current) => ({ ...current, payment: '' }))
                   setJobStatus(null)
@@ -2028,7 +2352,7 @@ export default function App() {
                     }} error={jobErrors.startTime} />
                   </View>
                 </View>
-                <FormField label="Dispatch notes" value={jobForm.comments} onChangeText={(value) => {
+                <FormField label="Dispatch notes" value={jobForm.comments} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, comments: value }))
                   setJobErrors((current) => ({ ...current, comments: '' }))
                   setJobStatus(null)
@@ -2070,6 +2394,7 @@ export default function App() {
                     <FormField
                       label="Name"
                       value={jobTypeDraft.name}
+                      onFocus={handleWorkspaceInputFocus}
                       onChangeText={(value) => {
                         setJobTypeDraft((current) => ({ ...current, name: value }))
                         setJobTypeFormError('')
@@ -2098,6 +2423,7 @@ export default function App() {
                     <TextInput
                       style={commonStyles.input}
                       value={jobTypeDraft.color}
+                      onFocus={handleWorkspaceInputFocus}
                       onChangeText={(value) => {
                         setJobTypeDraft((current) => ({ ...current, color: value }))
                         setJobTypeFormError('')
@@ -2165,6 +2491,11 @@ export default function App() {
                 <Text style={commonStyles.sectionTitle}>Clients</Text>
                 <TextInput style={commonStyles.input} value={clientSearch} onChangeText={setClientSearch} placeholder="Search by name, phone, or address" placeholderTextColor={colors.textMuted} />
               </View>
+              {clients.length === 0 ? (
+                <Panel>
+                  <Text style={commonStyles.text}>Create a job to view clients</Text>
+                </Panel>
+              ) : null}
               {filteredClients.map((client) => (
                 <View key={client.id} style={commonStyles.panel}>
                   <View style={commonStyles.rowBetween}>
@@ -2290,6 +2621,69 @@ export default function App() {
                   </View>
                 )
               })}
+              <Panel title="Policy and support" subtitle="Store-readiness links">
+                <Text style={commonStyles.text}>
+                  Open the public privacy, support, and account-management pages from the same web app customers can use outside the mobile app.
+                </Text>
+                <Text style={commonStyles.helperText}>{APP_WEB_BASE}</Text>
+                <View style={styles.jobTypeActionRow}>
+                  <Pressable
+                    style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
+                    onPress={() => openPublicPage(PUBLIC_PATHS.privacy)}
+                  >
+                    <Text style={commonStyles.buttonText}>Privacy</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
+                    onPress={() => openPublicPage(PUBLIC_PATHS.account)}
+                  >
+                    <Text style={commonStyles.buttonText}>Account page</Text>
+                  </Pressable>
+                </View>
+                <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={openSupportContact}>
+                  <Text style={commonStyles.buttonText}>{SUPPORT_EMAIL ? 'Email support' : 'Open support page'}</Text>
+                </Pressable>
+              </Panel>
+              <Panel title="Delete account" subtitle="Permanent action">
+                <Text style={commonStyles.text}>
+                  Remove this workspace account and its stored data. Paid Stripe subscriptions may need to be cancelled first.
+                </Text>
+                <FormField
+                  label="Current password"
+                  value={accountDeletionForm.password}
+                  onChangeText={(value) => {
+                    setAccountDeletionForm((current) => ({ ...current, password: value }))
+                    setAccountDeletionStatus('')
+                  }}
+                  secureTextEntry
+                  placeholder="Enter your current password"
+                />
+                <FormField
+                  label='Type DELETE to confirm'
+                  value={accountDeletionForm.confirmText}
+                  onChangeText={(value) => {
+                    setAccountDeletionForm((current) => ({ ...current, confirmText: value }))
+                    setAccountDeletionStatus('')
+                  }}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  placeholder="DELETE"
+                />
+                <Pressable
+                  style={[commonStyles.button, styles.deleteButton]}
+                  onPress={submitAccountDeletion}
+                  disabled={accountDeletionSubmitting}
+                >
+                  <Text style={commonStyles.buttonText}>
+                    {accountDeletionSubmitting ? 'Deleting account...' : 'Delete account'}
+                  </Text>
+                </Pressable>
+                {accountDeletionStatus ? (
+                  <Text style={accountDeletionStatus.toLowerCase().includes('unable') || accountDeletionStatus.toLowerCase().includes('incorrect') ? commonStyles.errorText : commonStyles.successText}>
+                    {accountDeletionStatus}
+                  </Text>
+                ) : null}
+              </Panel>
               {billingStatus ? (
                 <Panel>
                   <Text style={billingStatus.toLowerCase().includes('unable') ? commonStyles.errorText : commonStyles.successText}>
@@ -2320,30 +2714,25 @@ export default function App() {
                     ))}
                   </View>
                 </ScrollView>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                  <View style={styles.calendarControls}>
-                    <Chip label="Previous" onPress={() => stepCalendar(-1)} />
-                    <Chip label="Today" active onPress={jumpCalendarToToday} />
-                    <Chip label="Next" onPress={() => stepCalendar(1)} />
-                  </View>
-                </ScrollView>
-                <Pressable
-                  style={[commonStyles.button, commonStyles.buttonSecondary, styles.calendarLegendToggle]}
-                  onPress={() => setCalendarJobTypesVisible((current) => !current)}
-                >
-                  <Text style={commonStyles.buttonText}>
-                    {calendarJobTypesVisible ? 'Hide Job Types' : 'View Job Types'}
-                  </Text>
-                </Pressable>
-                {calendarJobTypesVisible ? (
-                  <View style={styles.calendarLegend}>
-                    {jobTypeOptions.map((jobType) => (
-                      <View key={jobType.id || jobType.name} style={styles.calendarLegendItem}>
-                        <View style={[styles.calendarLegendSwatch, { backgroundColor: getJobTypeColors(jobType.color || jobType.name, jobTypes).background }]} />
-                        <Text style={styles.calendarLegendText}>{jobType.name}</Text>
+                {calendarView !== 'day' ? (
+                  <>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                      <View style={styles.calendarControls}>
+                        <Chip label="Previous" onPress={() => stepCalendar(-1)} />
+                        <Chip label="Today" active onPress={jumpCalendarToToday} />
+                        <Chip label="Next" onPress={() => stepCalendar(1)} />
                       </View>
-                    ))}
-                  </View>
+                    </ScrollView>
+                    <Pressable
+                      style={[commonStyles.button, commonStyles.buttonSecondary, styles.calendarLegendToggle]}
+                      onPress={() => setCalendarJobTypesVisible((current) => !current)}
+                    >
+                      <Text style={commonStyles.buttonText}>
+                        {calendarJobTypesVisible ? 'Hide Job Types' : 'View Job Types'}
+                      </Text>
+                    </Pressable>
+                    {calendarJobTypesVisible ? renderCalendarLegend() : null}
+                  </>
                 ) : null}
               </View>
               {renderCalendarContent()}
@@ -2461,11 +2850,11 @@ function ExistingClientPicker({ visible, clients, query, onChangeQuery, onClose,
   )
 }
 
-function FormField({ label, error, helperText, belowInput = null, multiline, ...props }) {
+function FormField({ label, error, helperText, belowInput = null, multiline, labelStyle, inputStyle, ...props }) {
   return (
     <View>
-      <Text style={commonStyles.label}>{label}</Text>
-      <TextInput style={[commonStyles.input, multiline ? styles.multiline : null]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
+      <Text style={[commonStyles.label, labelStyle]}>{label}</Text>
+      <TextInput style={[commonStyles.input, multiline ? styles.multiline : null, inputStyle]} placeholderTextColor={colors.textMuted} multiline={multiline} textAlignVertical={multiline ? 'top' : 'center'} {...props} />
       {belowInput}
       {helperText ? <Text style={commonStyles.helperText}>{helperText}</Text> : null}
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
@@ -3014,6 +3403,238 @@ function JobModal({ job, clients, jobTypes = [], onClose, onSave, onDelete }) {
 }
 
 const styles = StyleSheet.create({
+  authScreen: {
+    backgroundColor: '#07111f'
+  },
+  authScrollContent: {
+    flexGrow: 1
+  },
+  authBackdrop: {
+    flex: 1,
+    minHeight: '100%',
+    backgroundColor: '#07111f',
+    overflow: 'hidden'
+  },
+  authGlowTop: {
+    position: 'absolute',
+    top: -110,
+    right: -90,
+    width: 300,
+    height: 300,
+    borderRadius: 999,
+    backgroundColor: 'rgba(109, 124, 255, 0.34)'
+  },
+  authGlowBottom: {
+    position: 'absolute',
+    bottom: 180,
+    left: -100,
+    width: 260,
+    height: 260,
+    borderRadius: 999,
+    backgroundColor: 'rgba(52, 211, 153, 0.18)'
+  },
+  authGrid: {
+    position: 'absolute',
+    top: 72,
+    right: -60,
+    width: 260,
+    height: 260,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    transform: [{ rotate: '16deg' }]
+  },
+  authHero: {
+    flex: 1,
+    minHeight: 520,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    paddingTop: 54,
+    paddingBottom: 40,
+    gap: 14
+  },
+  authEyebrow: {
+    color: 'rgba(226, 232, 240, 0.9)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase'
+  },
+  authMonogram: {
+    width: 128,
+    height: 128,
+    borderRadius: 34,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(15, 23, 42, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#020617',
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8
+  },
+  authMonogramText: {
+    color: '#f8fafc',
+    fontSize: 46,
+    fontWeight: '900',
+    letterSpacing: -2
+  },
+  authWordmarkPrimary: {
+    color: '#f8fafc',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+    textAlign: 'center'
+  },
+  authWordmarkAccent: {
+    color: '#a855f7',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+    textAlign: 'center',
+    marginTop: -12
+  },
+  authHeroTitle: {
+    color: '#e2e8f0',
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '800',
+    textAlign: 'center',
+    maxWidth: 360
+  },
+  authHeroStatus: {
+    color: 'rgba(226, 232, 240, 0.78)',
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    maxWidth: 320
+  },
+  authHeroStatusError: {
+    color: '#fda4af',
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    maxWidth: 320
+  },
+  authSheet: {
+    marginTop: 'auto',
+    backgroundColor: '#f8fafc',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 28,
+    gap: 18
+  },
+  authCtaStack: {
+    gap: 14
+  },
+  authFormWrap: {
+    gap: 14
+  },
+  authFormHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14
+  },
+  authFormCopy: {
+    flex: 1,
+    gap: 4
+  },
+  authFormEyebrow: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase'
+  },
+  authFormTitle: {
+    color: '#0f172a',
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: -0.8
+  },
+  authFormText: {
+    color: '#475569',
+    fontSize: 14,
+    lineHeight: 20
+  },
+  authBackLink: {
+    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '800',
+    paddingTop: 2
+  },
+  authInputLabel: {
+    color: '#0f172a'
+  },
+  authInput: {
+    backgroundColor: '#ffffff',
+    borderColor: 'rgba(15, 23, 42, 0.12)',
+    color: '#0f172a'
+  },
+  authPrimaryButton: {
+    backgroundColor: '#a855f7',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.38)',
+    overflow: 'hidden',
+    position: 'relative',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6
+  },
+  authPrimaryButtonGlow: {
+    position: 'absolute',
+    top: -18,
+    left: -10,
+    width: 150,
+    height: 70,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.16)'
+  },
+  authPrimaryButtonGlowSecondary: {
+    position: 'absolute',
+    right: -18,
+    bottom: -20,
+    width: 130,
+    height: 72,
+    borderRadius: 999,
+    backgroundColor: 'rgba(192, 132, 252, 0.28)'
+  },
+  authPrimaryButtonText: {
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 16,
+    zIndex: 1
+  },
+  authSecondaryButton: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.12)'
+  },
+  authSecondaryButtonText: {
+    color: '#a855f7',
+    fontWeight: '900',
+    fontSize: 16
+  },
+  authModeSwitch: {
+    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingTop: 4
+  },
+  authInlineLinkText: {
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '700'
+  },
   keyboardFrame: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   workspaceOverview: {
@@ -3410,6 +4031,16 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 2
   },
+  inlineLinkRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14
+  },
+  inlineLinkText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700'
+  },
   inlineActionText: {
     color: colors.heading,
     fontSize: 12,
@@ -3445,6 +4076,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12
   },
+  calendarDayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12
+  },
   calendarRangeInline: {
     color: colors.text,
     fontSize: 13,
@@ -3462,6 +4099,26 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 14,
     paddingHorizontal: 16
+  },
+  calendarInlineToggle: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  calendarInlineToggleActive: {
+    backgroundColor: 'rgba(109, 124, 255, 0.16)',
+    borderColor: 'rgba(109, 124, 255, 0.36)'
+  },
+  calendarInlineToggleText: {
+    color: colors.heading,
+    fontSize: 12,
+    fontWeight: '800'
   },
   calendarLegend: {
     flexDirection: 'row',
@@ -3564,6 +4221,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12
+  },
+  calendarDayActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14
+  },
+  calendarDayLegendWrap: {
+    marginTop: 14
   },
   calendarGrossIncomeText: {
     color: colors.heading,
