@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useApi } from './apiContext'
+import AccountDeletionPanel from './AccountDeletionPanel'
+import { PUBLIC_PATHS } from './appInfo'
 
 const DEFAULT_BILLING_PLANS = [
   {
@@ -98,7 +100,7 @@ const formatResetDate = (value) => {
 const formatUsageLabel = (used, limit, noun) =>
   limit === null ? `Unlimited ${noun}` : `${used} / ${limit} ${noun}`
 
-export default function BillingPage() {
+export default function BillingPage({ onAccountDeleted }) {
   const {
     subscriptionSummary,
     subscriptionLoading,
@@ -306,6 +308,26 @@ export default function BillingPage() {
             </article>
           )
         })}
+      </div>
+
+      <div className="public-info-grid billing-support-grid">
+        <article className="public-info-card">
+          <h3>Policy and support</h3>
+          <p>Keep your workspace launch-ready with quick access to privacy, support, and account-management pages.</p>
+          <div className="public-page-actions">
+            <a className="comments-button comments-button--ghost" href={PUBLIC_PATHS.privacy}>
+              Privacy policy
+            </a>
+            <a className="comments-button comments-button--ghost" href={PUBLIC_PATHS.support}>
+              Support
+            </a>
+            <a className="comments-button comments-button--ghost" href={PUBLIC_PATHS.account}>
+              Account page
+            </a>
+          </div>
+        </article>
+
+        <AccountDeletionPanel onDeleted={onAccountDeleted} />
       </div>
     </section>
   )

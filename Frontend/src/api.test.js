@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 
 import { getTokenExpiry, getTokenPayload } from './api.js'
+import { getPublicAppUrl } from './appInfo.js'
 
 const createTestToken = (payload) => {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
@@ -25,4 +26,9 @@ test('getTokenExpiry returns milliseconds for scheduler use', () => {
 
 test('getTokenPayload rejects malformed tokens', () => {
   assert.equal(getTokenPayload('not-a-token'), null)
+})
+
+test('getPublicAppUrl normalizes public page paths', () => {
+  assert.match(getPublicAppUrl('/privacy'), /\/privacy$/)
+  assert.match(getPublicAppUrl('support'), /\/support$/)
 })

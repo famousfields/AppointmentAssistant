@@ -488,6 +488,47 @@ const getSubscriptionContextForUser = async (userId) => {
   };
 };
 
+const deleteUserWorkspaceData = async (userId) => {
+  const [clientRows] = await db.promise().query(
+    `
+      SELECT DISTINCT client_id
+      FROM Jobs
+      WHERE user_id = ? AND client_id IS NOT NULL
+    `,
+    [userId]
+  );
+  const clientIds = clientRows.map((row) => Number(row.client_id)).filter(Boolean);
+
+  await db.promise().query("START TRANSACTION");
+  try {
+    await db.promise().query("DELETE FROM refresh_tokens WHERE user_id = ?", [userId]);
+    await db.promise().query("DELETE FROM account_subscriptions WHERE user_id = ?", [userId]);
+    await db.promise().query("DELETE FROM job_types WHERE user_id = ?", [userId]);
+    await db.promise().query("DELETE FROM Jobs WHERE user_id = ?", [userId]);
+
+    if (clientIds.length > 0) {
+      await db.promise().query(
+        `
+          DELETE FROM Clients
+          WHERE id IN (?)
+            AND NOT EXISTS (
+              SELECT 1
+              FROM Jobs
+              WHERE Jobs.client_id = Clients.id
+            )
+        `,
+        [clientIds]
+      );
+    }
+
+    await db.promise().query("DELETE FROM users WHERE id = ?", [userId]);
+    await db.promise().query("COMMIT");
+  } catch (error) {
+    await db.promise().query("ROLLBACK");
+    throw error;
+  }
+};
+
 const buildPlanLimitMessage = (summary, { createsClient = false, createsJob = false } = {}) => {
   const messages = [];
 
@@ -802,6 +843,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options("/users", cors(corsOptions));
+app.options("/users/me", cors(corsOptions));
 app.options("/auth/login", cors(corsOptions));
 app.options("/auth/refresh", cors(corsOptions));
 app.options("/auth/logout", cors(corsOptions));
@@ -999,6 +1041,69 @@ app.post("/auth/logout", async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+app.delete(
+  "/users/me",
+  requireAuth,
+  [
+    body("password").isLength({ min: 8 }).withMessage("Current password is required"),
+    body("confirmText")
+      .custom((value) => String(value || "").trim().toUpperCase() === "DELETE")
+      .withMessage('Type DELETE to confirm account removal')
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      const [[user]] = await db.promise().query(
+        "SELECT id, password FROM users WHERE id = ? LIMIT 1",
+        [req.user.id]
+      );
+
+      if (!user) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+
+      const passwordMatches = await bcrypt.compare(req.body.password, user.password);
+      if (!passwordMatches) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      const subscriptionContext = await getSubscriptionContextForUser(req.user.id);
+      if (subscriptionContext.summary.planCode !== "free" && isStripeReady()) {
+        const customerId = subscriptionContext.row?.stripe_customer_id || null;
+        if (customerId) {
+          const portalSession = await createPortalSession({
+            customerId,
+            returnUrl: STRIPE_CONFIG.portalReturnUrl || STRIPE_CONFIG.successUrl || STRIPE_CONFIG.cancelUrl
+          });
+
+          return res.status(409).json({
+            error: "Cancel your paid subscription in Stripe before deleting this account.",
+            code: "ACTIVE_SUBSCRIPTION_REQUIRES_CANCELLATION",
+            portalUrl: portalSession.url,
+            portalSessionId: portalSession.id,
+            subscription: subscriptionContext.summary
+          });
+        }
+      }
+
+      await deleteUserWorkspaceData(req.user.id);
+      res.setHeader("Set-Cookie", clearRefreshTokenCookie(getRefreshCookieOptions()));
+      return res.json({ message: "Your account and workspace data were deleted." });
+    } catch (error) {
+      console.error("Error deleting account:", error);
+      const message =
+        error.code === "ER_NO_SUCH_TABLE"
+          ? "Account data tables are missing. Run the backend migrations."
+          : error.message || error.stripe?.error?.message || "Unable to delete the account";
+      return res.status(error.statusCode || 500).json({ error: message });
+    }
+  }
+);
 
 app.post(
   "/jobs",

@@ -18,13 +18,16 @@ import {
 } from 'react-native'
 import {
   API_BASE,
+  APP_WEB_BASE,
   apiFetch,
   buildSessionRecord,
   clearJobDraft,
+  getPublicAppUrl,
   loadJobDraft,
   loadStoredSession,
   persistJobDraft,
-  persistSession
+  persistSession,
+  SUPPORT_EMAIL
 } from './src/api'
 import GoogleMapsLink from './src/GoogleMapsLink'
 import { colors, commonStyles } from './src/theme'
@@ -149,6 +152,12 @@ const EMPTY_JOB_FORM = {
   startTime: '',
   payment: '',
   comments: ''
+}
+
+const PUBLIC_PATHS = {
+  privacy: '/privacy',
+  support: '/support',
+  account: '/account'
 }
 
 const parseDateValue = (value) => {
@@ -662,6 +671,9 @@ const applyClientDetails = (client) => ({
   address: client.address || ''
 })
 
+const getApiErrorMessage = (payload, fallback) =>
+  payload?.error || payload?.message || payload?.errors?.[0]?.msg || fallback
+
 
 export default function App() {
   const [ready, setReady] = useState(false)
@@ -690,6 +702,9 @@ export default function App() {
   const [billingError, setBillingError] = useState('')
   const [billingStatus, setBillingStatus] = useState('')
   const [billingSavingPlanCode, setBillingSavingPlanCode] = useState('')
+  const [accountDeletionForm, setAccountDeletionForm] = useState({ password: '', confirmText: '' })
+  const [accountDeletionStatus, setAccountDeletionStatus] = useState('')
+  const [accountDeletionSubmitting, setAccountDeletionSubmitting] = useState(false)
   const [jobTypeDraft, setJobTypeDraft] = useState({ name: '', color: JOB_TYPE_COLOR_PRESETS[0] })
   const [jobTypeEditingId, setJobTypeEditingId] = useState(null)
   const [jobTypeFormError, setJobTypeFormError] = useState('')
@@ -750,6 +765,14 @@ export default function App() {
   useEffect(() => {
     persistJobDraft(jobForm)
   }, [jobForm])
+
+  useEffect(() => {
+    if (!session) {
+      setAccountDeletionForm({ password: '', confirmText: '' })
+      setAccountDeletionStatus('')
+      setAccountDeletionSubmitting(false)
+    }
+  }, [session])
 
   useEffect(() => {
     if (!session) {
@@ -1393,6 +1416,66 @@ export default function App() {
     setSession(null)
   }
 
+  const openPublicPage = async (path) => {
+    const url = getPublicAppUrl(path)
+    try {
+      await Linking.openURL(url)
+    } catch {
+      Alert.alert('Unable to open link', `Try opening ${url} in your browser.`)
+    }
+  }
+
+  const openSupportContact = async () => {
+    if (!SUPPORT_EMAIL) {
+      await openPublicPage(PUBLIC_PATHS.support)
+      return
+    }
+
+    const supportUrl = `mailto:${SUPPORT_EMAIL}`
+    try {
+      await Linking.openURL(supportUrl)
+    } catch {
+      await openPublicPage(PUBLIC_PATHS.support)
+    }
+  }
+
+  const submitAccountDeletion = async () => {
+    if (!session) return
+
+    setAccountDeletionSubmitting(true)
+    setAccountDeletionStatus('')
+    try {
+      const response = await apiFetch('/users/me', {
+        method: 'DELETE',
+        body: JSON.stringify(accountDeletionForm),
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        onSessionChange: setSession
+      })
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        if (payload?.portalUrl) {
+          setAccountDeletionStatus(payload.error || 'Open Stripe to cancel your subscription before deleting the account.')
+          await Linking.openURL(payload.portalUrl)
+          return
+        }
+
+        throw new Error(getApiErrorMessage(payload, 'Unable to delete your account right now.'))
+      }
+
+      setAccountDeletionForm({ password: '', confirmText: '' })
+      setAccountDeletionStatus(payload.message || 'Your account and workspace data were deleted.')
+      setActiveTab('calendar')
+      Alert.alert('Account deleted', payload.message || 'Your account and workspace data were deleted.')
+      setSession(null)
+    } catch (error) {
+      setAccountDeletionStatus(error.message || 'Unable to delete your account right now.')
+    } finally {
+      setAccountDeletionSubmitting(false)
+    }
+  }
+
   const saveJobUpdates = async (jobId, updates) => {
     if (!session) return
 
@@ -1847,6 +1930,17 @@ export default function App() {
                 <Text style={commonStyles.buttonText}>{authSubmitting ? 'Working...' : isCreate ? 'Create account' : 'Sign in'}</Text>
               </Pressable>
               {authStatus ? <Text style={authStatus.type === 'error' ? commonStyles.errorText : commonStyles.successText}>{authStatus.message}</Text> : null}
+              <View style={styles.inlineLinkRow}>
+                <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.privacy)}>
+                  <Text style={styles.inlineLinkText}>Privacy policy</Text>
+                </Pressable>
+                <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.support)}>
+                  <Text style={styles.inlineLinkText}>Support</Text>
+                </Pressable>
+                <Pressable onPress={() => openPublicPage(PUBLIC_PATHS.account)}>
+                  <Text style={styles.inlineLinkText}>Account page</Text>
+                </Pressable>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -2290,6 +2384,69 @@ export default function App() {
                   </View>
                 )
               })}
+              <Panel title="Policy and support" subtitle="Store-readiness links">
+                <Text style={commonStyles.text}>
+                  Open the public privacy, support, and account-management pages from the same web app customers can use outside the mobile app.
+                </Text>
+                <Text style={commonStyles.helperText}>{APP_WEB_BASE}</Text>
+                <View style={styles.jobTypeActionRow}>
+                  <Pressable
+                    style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
+                    onPress={() => openPublicPage(PUBLIC_PATHS.privacy)}
+                  >
+                    <Text style={commonStyles.buttonText}>Privacy</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[commonStyles.button, commonStyles.buttonSecondary, styles.jobTypeActionButton]}
+                    onPress={() => openPublicPage(PUBLIC_PATHS.account)}
+                  >
+                    <Text style={commonStyles.buttonText}>Account page</Text>
+                  </Pressable>
+                </View>
+                <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={openSupportContact}>
+                  <Text style={commonStyles.buttonText}>{SUPPORT_EMAIL ? 'Email support' : 'Open support page'}</Text>
+                </Pressable>
+              </Panel>
+              <Panel title="Delete account" subtitle="Permanent action">
+                <Text style={commonStyles.text}>
+                  Remove this workspace account and its stored data. Paid Stripe subscriptions may need to be cancelled first.
+                </Text>
+                <FormField
+                  label="Current password"
+                  value={accountDeletionForm.password}
+                  onChangeText={(value) => {
+                    setAccountDeletionForm((current) => ({ ...current, password: value }))
+                    setAccountDeletionStatus('')
+                  }}
+                  secureTextEntry
+                  placeholder="Enter your current password"
+                />
+                <FormField
+                  label='Type DELETE to confirm'
+                  value={accountDeletionForm.confirmText}
+                  onChangeText={(value) => {
+                    setAccountDeletionForm((current) => ({ ...current, confirmText: value }))
+                    setAccountDeletionStatus('')
+                  }}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  placeholder="DELETE"
+                />
+                <Pressable
+                  style={[commonStyles.button, styles.deleteButton]}
+                  onPress={submitAccountDeletion}
+                  disabled={accountDeletionSubmitting}
+                >
+                  <Text style={commonStyles.buttonText}>
+                    {accountDeletionSubmitting ? 'Deleting account...' : 'Delete account'}
+                  </Text>
+                </Pressable>
+                {accountDeletionStatus ? (
+                  <Text style={accountDeletionStatus.toLowerCase().includes('unable') || accountDeletionStatus.toLowerCase().includes('incorrect') ? commonStyles.errorText : commonStyles.successText}>
+                    {accountDeletionStatus}
+                  </Text>
+                ) : null}
+              </Panel>
               {billingStatus ? (
                 <Panel>
                   <Text style={billingStatus.toLowerCase().includes('unable') ? commonStyles.errorText : commonStyles.successText}>
@@ -3409,6 +3566,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 2
+  },
+  inlineLinkRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14
+  },
+  inlineLinkText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700'
   },
   inlineActionText: {
     color: colors.heading,

@@ -7,9 +7,13 @@ import ClientsList from './clients'
 import LoginPage from './LoginPage'
 import CalendarPage from './CalendarPage'
 import BillingPage from './BillingPage'
+import PrivacyPage from './PrivacyPage'
+import SupportPage from './SupportPage'
+import AccountPage from './AccountPage'
 import { API_BASE, getTokenExpiry } from './api'
 import { ApiContext } from './apiContext'
 import useSubscription from './useSubscription'
+import { PUBLIC_PATHS } from './appInfo'
 
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 
@@ -39,8 +43,22 @@ const PAGE_META = {
   '/billing': {
     title: 'Billing and plans',
     description: 'Review your plan, usage, monthly reset date, and upgrade options.'
+  },
+  [PUBLIC_PATHS.privacy]: {
+    title: 'Privacy policy',
+    description: 'Review how Appointment Assistant handles account, client, and job data.'
+  },
+  [PUBLIC_PATHS.support]: {
+    title: 'Support',
+    description: 'Find billing, privacy, and account support resources.'
+  },
+  [PUBLIC_PATHS.account]: {
+    title: 'Account management',
+    description: 'Manage account deletion and review your workspace data controls.'
   }
 }
+
+const STANDALONE_PUBLIC_PATHS = new Set([PUBLIC_PATHS.privacy, PUBLIC_PATHS.support, PUBLIC_PATHS.account])
 
 const buildSessionRecord = ({ user, accessToken }) => {
   if (!accessToken) return null
@@ -87,6 +105,7 @@ function AppContent() {
   const location = useLocation()
   const navigate = useNavigate()
   const isLogin = location.pathname === '/'
+  const isStandalonePublicPage = STANDALONE_PUBLIC_PATHS.has(location.pathname)
 
   const updateSessionFromLogin = useCallback((payload) => {
     const record = buildSessionRecord(payload)
@@ -218,6 +237,12 @@ function AppContent() {
     navigate('/')
   }
 
+  const handleAccountDeleted = useCallback(() => {
+    setSession(null)
+    setShowLogoutMenu(false)
+    navigate('/')
+  }, [navigate])
+
   const apiContextValue = useMemo(
     () => ({
       fetchWithAuth,
@@ -240,8 +265,8 @@ function AppContent() {
   )
 
   return (
-    <div className={`app-shell${isLogin ? ' app-shell--login' : ''}`}>
-      {!isLogin && (
+    <div className={`app-shell${isLogin || isStandalonePublicPage ? ' app-shell--login' : ''}`}>
+      {!isLogin && !isStandalonePublicPage && (
             <aside className="app-sidebar">
               <div className="sidebar-brand-block">
                 <div className="sidebar-brand-mark">AA</div>
@@ -272,7 +297,7 @@ function AppContent() {
       )}
 
       <main className="app-main">
-        {!isLogin && (
+        {!isLogin && !isStandalonePublicPage && (
           <header className="page-header">
             <div className="page-header-content">
               <div className="page-header-main">
@@ -346,7 +371,7 @@ function AppContent() {
           </header>
         )}
 
-        <section className={`page-content${isLogin ? ' page-content--login' : ''}`}>
+        <section className={`page-content${isLogin || isStandalonePublicPage ? ' page-content--login' : ''}`}>
           <ApiContext.Provider value={apiContextValue}>
             <Routes>
               <Route path="/" element={<LoginPage onLogin={updateSessionFromLogin} />} />
@@ -354,7 +379,10 @@ function AppContent() {
               <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
               <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
               <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
-              <Route path="/billing" element={<BillingPage />} />
+              <Route path="/billing" element={<BillingPage onAccountDeleted={handleAccountDeleted} />} />
+              <Route path={PUBLIC_PATHS.privacy} element={<PrivacyPage />} />
+              <Route path={PUBLIC_PATHS.support} element={<SupportPage />} />
+              <Route path={PUBLIC_PATHS.account} element={<AccountPage onAccountDeleted={handleAccountDeleted} />} />
             </Routes>
           </ApiContext.Provider>
         </section>

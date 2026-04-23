@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import './App.css'
 
 import { API_BASE } from './api'
+import { PUBLIC_PATHS } from './appInfo'
 
 export default function LoginPage({ onLogin }) {
   const navigate = useNavigate()
@@ -212,6 +213,11 @@ export default function LoginPage({ onLogin }) {
 
         {status && <p className={`form-status form-status--${status.type}`}>{status.message}</p>}
         <p className="login-note">Use your account to access your client list, calendar, job history, and appointment updates.</p>
+        <div className="login-legal-links">
+          <a href={PUBLIC_PATHS.privacy}>Privacy policy</a>
+          <a href={PUBLIC_PATHS.support}>Support</a>
+          <a href={PUBLIC_PATHS.account}>Account management</a>
+        </div>
       </form>
     </div>
   )
