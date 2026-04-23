@@ -6,6 +6,7 @@ import JobForm from './JobForm'
 import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
+import LandingScreen from './landingscreen'
 import CalendarPage from './CalendarPage'
 import BillingPage from './BillingPage'
 import PrivacyPage from './PrivacyPage'
@@ -29,6 +30,10 @@ const PAGE_META = {
   '/jobs/new': {
     title: 'Create a new job',
     description: 'Add an appointment with client details, scheduling info, and notes.'
+  },
+  '/': {
+    title: 'Appointment Assistant',
+    description: 'Scheduling, client tracking, and job management for service businesses across desktop and mobile.'
   },
   '/jobs': {
     title: 'Job dashboard',
@@ -156,9 +161,11 @@ function AppContent() {
   const usageLimitPromptSignatureRef = useRef('')
   const location = useLocation()
   const navigate = useNavigate()
-  const isLogin = location.pathname === '/'
+  const isLandingPage = location.pathname === PUBLIC_PATHS.home
+  const isLogin = location.pathname === PUBLIC_PATHS.login
   const isJobCreationPage = location.pathname === '/jobs/new'
   const isStandalonePublicPage = STANDALONE_PUBLIC_PATHS.has(location.pathname)
+  const isPublicExperience = isLandingPage || isLogin || isStandalonePublicPage
 
   const updateSessionFromLogin = useCallback((payload) => {
     const record = buildSessionRecord(payload)
@@ -203,15 +210,8 @@ function AppContent() {
   }, [session])
 
   const pageMeta = useMemo(() => {
-    if (isLogin) {
-      return {
-        title: 'Appointment Assistant',
-        description: 'A polished, dark workspace for managing jobs, clients, and follow-up notes.'
-      }
-    }
-
     return PAGE_META[location.pathname] || PAGE_META['/calendar']
-  }, [isLogin, location.pathname])
+  }, [location.pathname])
 
   useEffect(() => {
     if (!session?.expiresAt) return undefined
@@ -365,8 +365,8 @@ function AppContent() {
   }, [acknowledgeUsageLimitPrompt, currentUser, location.pathname, subscriptionSummary])
 
   return (
-    <div className={`app-shell${isLogin || isStandalonePublicPage ? ' app-shell--login' : ''}`}>
-      {!isLogin && !isStandalonePublicPage && (
+    <div className={`app-shell${isPublicExperience ? ' app-shell--login' : ''}`}>
+      {!isPublicExperience && (
         <aside className="app-sidebar">
           <div className="sidebar-brand-block">
             <div className="sidebar-brand-mark">AA</div>
@@ -397,7 +397,7 @@ function AppContent() {
       )}
 
       <main className="app-main">
-        {!isLogin && !isStandalonePublicPage && (
+        {!isPublicExperience && (
           <header className={`page-header${isJobCreationPage ? ' page-header--workflow' : ''}`}>
             <div className="page-header-content">
               <div className="page-header-main">
@@ -444,7 +444,7 @@ function AppContent() {
                   <button
                     type="button"
                     className="sidebar-secondary-action"
-                    onClick={() => navigate('/')}
+                    onClick={() => navigate(PUBLIC_PATHS.login)}
                   >
                     Return to login
                   </button>
@@ -472,11 +472,12 @@ function AppContent() {
         )}
 
         <section
-          className={`page-content${isLogin || isStandalonePublicPage ? ' page-content--login' : ''}${isJobCreationPage ? ' page-content--workflow' : ''}`}
+          className={`page-content${isPublicExperience ? ' page-content--login' : ''}${isJobCreationPage ? ' page-content--workflow' : ''}`}
         >
           <ApiContext.Provider value={apiContextValue}>
             <Routes>
-              <Route path="/" element={<LoginPage onLogin={updateSessionFromLogin} />} />
+              <Route path="/" element={<LandingScreen currentUser={currentUser} />} />
+              <Route path={PUBLIC_PATHS.login} element={<LoginPage onLogin={updateSessionFromLogin} />} />
               <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
               <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
               <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 
 import { API_BASE } from './api'
@@ -7,7 +7,9 @@ import { PUBLIC_PATHS } from './appInfo'
 
 export default function LoginPage({ onLogin }) {
   const navigate = useNavigate()
-  const [formMode, setFormMode] = useState('login')
+  const location = useLocation()
+  const initialMode = new URLSearchParams(location.search).get('mode') === 'create' ? 'create' : 'login'
+  const [formMode, setFormMode] = useState(initialMode)
   const [formData, setFormData] = useState({
     displayName: '',
     email: '',
@@ -18,6 +20,11 @@ export default function LoginPage({ onLogin }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const isCreateMode = formMode === 'create'
+
+  useEffect(() => {
+    setFormMode(initialMode)
+    setStatus(null)
+  }, [initialMode])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -229,6 +236,7 @@ export default function LoginPage({ onLogin }) {
         {status && <p className={`form-status form-status--${status.type}`}>{status.message}</p>}
         <p className="login-note">Use your account to access your client list, calendar, job history, and appointment updates.</p>
         <div className="login-legal-links">
+          <a href={PUBLIC_PATHS.home}>Home</a>
           <a href={PUBLIC_PATHS.privacy}>Privacy policy</a>
           <a href={PUBLIC_PATHS.support}>Support</a>
           <a href={PUBLIC_PATHS.account}>Account management</a>

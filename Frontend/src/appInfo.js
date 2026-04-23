@@ -6,8 +6,11 @@ export const APP_WEB_BASE = normalizeBase(
 )
 
 export const SUPPORT_EMAIL = String(import.meta.env?.VITE_SUPPORT_EMAIL || '').trim()
+export const GOOGLE_PLAY_URL = String(import.meta.env?.VITE_GOOGLE_PLAY_URL || '').trim()
 
 export const PUBLIC_PATHS = {
+  home: '/',
+  login: '/login',
   privacy: '/privacy',
   support: '/support',
   account: '/account'
