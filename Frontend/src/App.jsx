@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BrowserRouter as Router, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useRef } from 'react'
 import './App.css'
 import JobForm from './JobForm'
 import JobsList from './jobs'
@@ -16,6 +17,7 @@ import useSubscription from './useSubscription'
 import { PUBLIC_PATHS } from './appInfo'
 
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
+const USAGE_LIMIT_PROMPT_STORAGE_PREFIX = 'appointment-assistant:usage-limit-prompt:'
 
 const NAV_ITEMS = [
   { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
@@ -91,6 +93,54 @@ const loadSessionFromStorage = () => {
   }
 }
 
+const getUsageLimitPromptStorageKey = (userId) =>
+  `${USAGE_LIMIT_PROMPT_STORAGE_PREFIX}${userId ?? 'guest'}`
+
+const formatBillingResetDate = (value) => {
+  if (!value) return 'Unavailable'
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+const getUsageLimitPromptDetails = (summary) => {
+  if (!summary || summary.planCode !== 'free' || !summary.entitlements?.creationBlocked) {
+    return null
+  }
+
+  const usage = summary.usage || {}
+  const clientsBlocked =
+    usage.monthlyClientLimit !== null &&
+    usage.monthlyClientLimit !== undefined &&
+    Number(usage.monthlyClientCreations ?? 0) >= Number(usage.monthlyClientLimit)
+  const jobsBlocked =
+    usage.monthlyJobLimit !== null &&
+    usage.monthlyJobLimit !== undefined &&
+    Number(usage.monthlyJobCreations ?? 0) >= Number(usage.monthlyJobLimit)
+
+  const exhaustedLimits = []
+  if (clientsBlocked) exhaustedLimits.push(`${usage.monthlyClientLimit} clients`)
+  if (jobsBlocked) exhaustedLimits.push(`${usage.monthlyJobLimit} jobs`)
+
+  const limitLabel =
+    exhaustedLimits.length === 0
+      ? 'the included Free plan usage'
+      : exhaustedLimits.length === 1
+        ? exhaustedLimits[0]
+        : `${exhaustedLimits.slice(0, -1).join(', ')} and ${exhaustedLimits[exhaustedLimits.length - 1]}`
+
+  return {
+    signature: `${summary.currentPeriodEndsAt}:${clientsBlocked ? 'clients' : 'no-clients'}:${jobsBlocked ? 'jobs' : 'no-jobs'}`,
+    title: 'Free Plan Limit Reached',
+    message: `You have used all ${limitLabel} included with the Free plan. Your allowance resets on ${formatBillingResetDate(summary.currentPeriodEndsAt)}. Open billing to upgrade and keep creating records.`
+  }
+}
+
 function App() {
   return (
     <Router>
@@ -102,6 +152,8 @@ function App() {
 function AppContent() {
   const [session, setSession] = useState(loadSessionFromStorage)
   const [showLogoutMenu, setShowLogoutMenu] = useState(false)
+  const [usageLimitPrompt, setUsageLimitPrompt] = useState(null)
+  const usageLimitPromptSignatureRef = useRef('')
   const location = useLocation()
   const navigate = useNavigate()
   const isLogin = location.pathname === '/'
@@ -244,6 +296,22 @@ function AppContent() {
     navigate('/')
   }, [navigate])
 
+  const acknowledgeUsageLimitPrompt = useCallback((signature) => {
+    if (!currentUser || typeof window === 'undefined' || !signature) return
+
+    usageLimitPromptSignatureRef.current = signature
+    window.sessionStorage.setItem(getUsageLimitPromptStorageKey(currentUser.id), signature)
+  }, [currentUser])
+
+  const openBillingFromUsagePrompt = useCallback(() => {
+    if (usageLimitPrompt?.signature) {
+      acknowledgeUsageLimitPrompt(usageLimitPrompt.signature)
+    }
+
+    setUsageLimitPrompt(null)
+    navigate('/billing')
+  }, [acknowledgeUsageLimitPrompt, navigate, usageLimitPrompt])
+
   const apiContextValue = useMemo(
     () => ({
       fetchWithAuth,
@@ -264,6 +332,37 @@ function AppContent() {
       subscriptionSummary
     ]
   )
+
+  useEffect(() => {
+    if (!currentUser || !subscriptionSummary) {
+      setUsageLimitPrompt(null)
+      usageLimitPromptSignatureRef.current = ''
+      return
+    }
+
+    const prompt = getUsageLimitPromptDetails(subscriptionSummary)
+    if (!prompt) {
+      setUsageLimitPrompt(null)
+      return
+    }
+
+    if (typeof window === 'undefined') return
+
+    const storageKey = getUsageLimitPromptStorageKey(currentUser.id)
+    const seenSignature = window.sessionStorage.getItem(storageKey) || ''
+
+    if (location.pathname === '/billing') {
+      acknowledgeUsageLimitPrompt(prompt.signature)
+      setUsageLimitPrompt(null)
+      return
+    }
+
+    if (seenSignature === prompt.signature || usageLimitPromptSignatureRef.current === prompt.signature) {
+      return
+    }
+
+    setUsageLimitPrompt(prompt)
+  }, [acknowledgeUsageLimitPrompt, currentUser, location.pathname, subscriptionSummary])
 
   return (
     <div className={`app-shell${isLogin || isStandalonePublicPage ? ' app-shell--login' : ''}`}>
@@ -390,6 +489,26 @@ function AppContent() {
           </ApiContext.Provider>
         </section>
       </main>
+      {usageLimitPrompt ? (
+        <div className="comments-modal-backdrop" role="presentation">
+          <div className="comments-modal usage-limit-modal" role="dialog" aria-modal="true" aria-labelledby="usage-limit-modal-title">
+            <div className="comments-modal-header">
+              <p className="sidebar-section-label">Billing update</p>
+              <h3 id="usage-limit-modal-title">{usageLimitPrompt.title}</h3>
+              <p className="comments-modal-subtitle">{usageLimitPrompt.message}</p>
+            </div>
+            <div className="comments-modal-actions usage-limit-modal__actions">
+              <button
+                type="button"
+                className="comments-modal-button comments-modal-button--primary"
+                onClick={openBillingFromUsagePrompt}
+              >
+                Open billing
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

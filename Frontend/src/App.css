@@ -1525,6 +1525,18 @@
   gap: 12px;
 }
 
+.usage-limit-modal {
+  width: min(100%, 520px);
+}
+
+.usage-limit-modal__actions {
+  justify-content: stretch;
+}
+
+.usage-limit-modal__actions .comments-modal-button--primary {
+  width: 100%;
+}
+
 .job-editor-delete {
   width: 100%;
   margin-top: 12px;

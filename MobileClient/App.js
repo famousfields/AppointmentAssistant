@@ -410,6 +410,39 @@ const formatBillingResetDate = (value) => {
   })
 }
 
+const getUsageLimitPromptDetails = (summary) => {
+  if (!summary || summary.planCode !== 'free' || !summary.entitlements?.creationBlocked) {
+    return null
+  }
+
+  const usage = summary.usage || {}
+  const clientsBlocked =
+    usage.monthlyClientLimit !== null &&
+    usage.monthlyClientLimit !== undefined &&
+    Number(usage.monthlyClientCreations ?? 0) >= Number(usage.monthlyClientLimit)
+  const jobsBlocked =
+    usage.monthlyJobLimit !== null &&
+    usage.monthlyJobLimit !== undefined &&
+    Number(usage.monthlyJobCreations ?? 0) >= Number(usage.monthlyJobLimit)
+
+  const exhaustedLimits = []
+  if (clientsBlocked) exhaustedLimits.push(`${usage.monthlyClientLimit} clients`)
+  if (jobsBlocked) exhaustedLimits.push(`${usage.monthlyJobLimit} jobs`)
+
+  const limitLabel =
+    exhaustedLimits.length === 0
+      ? 'the included Free plan usage'
+      : exhaustedLimits.length === 1
+        ? exhaustedLimits[0]
+        : `${exhaustedLimits.slice(0, -1).join(', ')} and ${exhaustedLimits[exhaustedLimits.length - 1]}`
+
+  return {
+    signature: `${summary.currentPeriodEndsAt}:${clientsBlocked ? 'clients' : 'no-clients'}:${jobsBlocked ? 'jobs' : 'no-jobs'}`,
+    title: 'Free Plan Limit Reached',
+    message: `You have used all ${limitLabel} included with the Free plan. Your allowance resets on ${formatBillingResetDate(summary.currentPeriodEndsAt)}.`
+  }
+}
+
 const getContrastTextColor = (backgroundColor) => {
   const rgb = hexToRgb(backgroundColor)
   if (!rgb) return '#f8fafc'
@@ -684,6 +717,7 @@ export default function App() {
   const workspaceScrollRef = useRef(null)
   const focusedInputRef = useRef({ area: null, target: null })
   const keyboardScrollTimeoutRef = useRef(null)
+  const usageLimitPromptSignatureRef = useRef('')
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState(null)
   const [apiHealth, setApiHealth] = useState({ status: 'checking', message: 'Checking backend...' })
@@ -770,6 +804,26 @@ export default function App() {
     registerFocusedInput('workspace', event)
   }, [registerFocusedInput])
 
+  const openBillingLimitPrompt = useCallback((summary) => {
+    const prompt = getUsageLimitPromptDetails(summary)
+    if (!prompt) return
+
+    if (usageLimitPromptSignatureRef.current === prompt.signature) return
+    usageLimitPromptSignatureRef.current = prompt.signature
+
+    Alert.alert(
+      prompt.title,
+      `${prompt.message} Open billing to upgrade and keep creating records.`,
+      [
+        {
+          text: 'Open billing',
+          onPress: () => setActiveTab('billing')
+        }
+      ],
+      { cancelable: false }
+    )
+  }, [])
+
   useEffect(() => {
     const bootstrap = async () => {
       const [storedSession, storedDraft] = await Promise.all([loadStoredSession(), loadJobDraft()])
@@ -836,6 +890,24 @@ export default function App() {
       }
     }
   }, [scheduleScrollToFocusedInput])
+
+  useEffect(() => {
+    if (!session) {
+      usageLimitPromptSignatureRef.current = ''
+    }
+  }, [session])
+
+  useEffect(() => {
+    const prompt = getUsageLimitPromptDetails(billingSummary)
+    if (!prompt) return
+
+    if (activeTab === 'billing') {
+      usageLimitPromptSignatureRef.current = prompt.signature
+      return
+    }
+
+    openBillingLimitPrompt(billingSummary)
+  }, [activeTab, billingSummary, openBillingLimitPrompt])
 
   useEffect(() => {
     if (!session) {
@@ -1458,6 +1530,7 @@ export default function App() {
         type: 'error',
         message: `This workspace has reached its monthly free-tier limit. Upgrade or wait for the reset on ${formatBillingResetDate(billingSummary?.currentPeriodEndsAt)}.`
       })
+      openBillingLimitPrompt(billingSummary)
       return
     }
 
