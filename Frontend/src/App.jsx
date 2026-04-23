@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BrowserRouter as Router, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useRef } from 'react'
 import './App.css'
 import JobForm from './JobForm'
@@ -7,6 +7,8 @@ import JobsList from './jobs'
 import ClientsList from './clients'
 import LoginPage from './LoginPage'
 import LandingScreen from './landingscreen'
+import PricingPage from './PricingPage'
+import FeaturesPage from './FeaturesPage'
 import CalendarPage from './CalendarPage'
 import BillingPage from './BillingPage'
 import PrivacyPage from './PrivacyPage'
@@ -15,39 +17,51 @@ import AccountPage from './AccountPage'
 import { API_BASE, getTokenExpiry } from './api'
 import { ApiContext } from './apiContext'
 import useSubscription from './useSubscription'
-import { PUBLIC_PATHS } from './appInfo'
+import { APP_PATHS, PUBLIC_PATHS } from './appInfo'
 
 const SESSION_STORAGE_KEY = 'appointment-assistant:session'
 const USAGE_LIMIT_PROMPT_STORAGE_PREFIX = 'appointment-assistant:usage-limit-prompt:'
 
 const NAV_ITEMS = [
-  { label: 'Calendar', path: '/calendar', description: 'View your jobs by day, week, month, or year.' },
-  { label: 'View Jobs', path: '/jobs', description: 'Track every upcoming and completed job.', matchExact: true },
-  { label: 'Clients', path: '/clients', description: 'Browse customers and their job history.' }
+  { label: 'Calendar', path: APP_PATHS.calendar, description: 'View your jobs by day, week, month, or year.' },
+  { label: 'View Jobs', path: APP_PATHS.jobs, description: 'Track every upcoming and completed job.', matchExact: true },
+  { label: 'Clients', path: APP_PATHS.clients, description: 'Browse customers and their job history.' }
 ]
 
 const PAGE_META = {
-  '/jobs/new': {
+  [APP_PATHS.newJob]: {
     title: 'Create a new job',
     description: 'Add an appointment with client details, scheduling info, and notes.'
   },
-  '/': {
+  [PUBLIC_PATHS.home]: {
     title: 'Appointment Assistant',
     description: 'Scheduling, client tracking, and job management for service businesses across desktop and mobile.'
   },
-  '/jobs': {
+  [PUBLIC_PATHS.features]: {
+    title: 'Features',
+    description: 'See what Appointment Assistant includes for scheduling, client records, and mobile operations.'
+  },
+  [PUBLIC_PATHS.pricing]: {
+    title: 'Pricing',
+    description: 'Review free and paid plan options for Appointment Assistant.'
+  },
+  [APP_PATHS.jobs]: {
     title: 'Job dashboard',
     description: 'Review active work, update statuses, and keep every appointment on track.'
   },
-  '/clients': {
+  [APP_PATHS.clients]: {
     title: 'Client relationships',
     description: 'See every client and drill into their job history in one place.'
   },
-  '/calendar': {
+  [APP_PATHS.calendar]: {
     title: 'Calendar overview',
     description: 'See every scheduled job in daily, weekly, monthly, and yearly calendar views.'
   },
-  '/billing': {
+  [APP_PATHS.dashboard]: {
+    title: 'Calendar overview',
+    description: 'See every scheduled job in daily, weekly, monthly, and yearly calendar views.'
+  },
+  [APP_PATHS.billing]: {
     title: 'Billing and plans',
     description: 'Review your plan, usage, monthly reset date, and upgrade options.'
   },
@@ -161,11 +175,15 @@ function AppContent() {
   const usageLimitPromptSignatureRef = useRef('')
   const location = useLocation()
   const navigate = useNavigate()
-  const isLandingPage = location.pathname === PUBLIC_PATHS.home
-  const isLogin = location.pathname === PUBLIC_PATHS.login
-  const isJobCreationPage = location.pathname === '/jobs/new'
+  const isMarketingPage = [
+    PUBLIC_PATHS.home,
+    PUBLIC_PATHS.features,
+    PUBLIC_PATHS.pricing
+  ].includes(location.pathname)
+  const isLogin = location.pathname === PUBLIC_PATHS.login || location.pathname === PUBLIC_PATHS.signup
+  const isJobCreationPage = location.pathname === APP_PATHS.newJob
   const isStandalonePublicPage = STANDALONE_PUBLIC_PATHS.has(location.pathname)
-  const isPublicExperience = isLandingPage || isLogin || isStandalonePublicPage
+  const isPublicExperience = isMarketingPage || isLogin || isStandalonePublicPage
 
   const updateSessionFromLogin = useCallback((payload) => {
     const record = buildSessionRecord(payload)
@@ -175,7 +193,7 @@ function AppContent() {
   }, [])
 
   const currentUser = session?.user ?? null
-  const showWorkspaceNewJobAction = currentUser && location.pathname !== '/jobs/new'
+  const showWorkspaceNewJobAction = currentUser && location.pathname !== APP_PATHS.newJob
 
   const refreshAccessToken = useCallback(async () => {
     try {
@@ -210,7 +228,7 @@ function AppContent() {
   }, [session])
 
   const pageMeta = useMemo(() => {
-    return PAGE_META[location.pathname] || PAGE_META['/calendar']
+    return PAGE_META[location.pathname] || PAGE_META[APP_PATHS.dashboard]
   }, [location.pathname])
 
   useEffect(() => {
@@ -287,13 +305,13 @@ function AppContent() {
 
     setSession(null)
     setShowLogoutMenu(false)
-    navigate('/')
+    navigate(PUBLIC_PATHS.home)
   }
 
   const handleAccountDeleted = useCallback(() => {
     setSession(null)
     setShowLogoutMenu(false)
-    navigate('/')
+    navigate(PUBLIC_PATHS.home)
   }, [navigate])
 
   const acknowledgeUsageLimitPrompt = useCallback((signature) => {
@@ -309,7 +327,7 @@ function AppContent() {
     }
 
     setUsageLimitPrompt(null)
-    navigate('/billing')
+    navigate(APP_PATHS.billing)
   }, [acknowledgeUsageLimitPrompt, navigate, usageLimitPrompt])
 
   const apiContextValue = useMemo(
@@ -351,7 +369,7 @@ function AppContent() {
     const storageKey = getUsageLimitPromptStorageKey(currentUser.id)
     const seenSignature = window.sessionStorage.getItem(storageKey) || ''
 
-    if (location.pathname === '/billing') {
+    if (location.pathname === APP_PATHS.billing) {
       acknowledgeUsageLimitPrompt(prompt.signature)
       setUsageLimitPrompt(null)
       return
@@ -408,7 +426,7 @@ function AppContent() {
                   <button
                     type="button"
                     className="sidebar-primary-action page-header-primary-action"
-                    onClick={() => navigate('/jobs/new')}
+                    onClick={() => navigate(APP_PATHS.newJob)}
                   >
                     <span className="sidebar-primary-action-icon">+</span>
                     New Job
@@ -453,7 +471,7 @@ function AppContent() {
                   <button
                     type="button"
                     className={`page-header-plan${subscriptionSummary.entitlements?.creationBlocked ? ' page-header-plan--alert' : ''}`}
-                    onClick={() => navigate('/billing')}
+                    onClick={() => navigate(APP_PATHS.billing)}
                   >
                     <span className="sidebar-section-label">Plan</span>
                     <strong>{subscriptionSummary.planName}</strong>
@@ -477,12 +495,23 @@ function AppContent() {
           <ApiContext.Provider value={apiContextValue}>
             <Routes>
               <Route path="/" element={<LandingScreen currentUser={currentUser} />} />
+              <Route path={PUBLIC_PATHS.features} element={<FeaturesPage currentUser={currentUser} />} />
+              <Route path={PUBLIC_PATHS.pricing} element={<PricingPage currentUser={currentUser} />} />
               <Route path={PUBLIC_PATHS.login} element={<LoginPage onLogin={updateSessionFromLogin} />} />
-              <Route path="/jobs/new" element={<JobForm currentUser={currentUser} />} />
-              <Route path="/jobs" element={<JobsList currentUser={currentUser} />} />
-              <Route path="/clients" element={<ClientsList currentUser={currentUser} />} />
-              <Route path="/calendar" element={<CalendarPage currentUser={currentUser} />} />
-              <Route path="/billing" element={<BillingPage onAccountDeleted={handleAccountDeleted} />} />
+              <Route path={PUBLIC_PATHS.signup} element={<LoginPage onLogin={updateSessionFromLogin} defaultMode="create" />} />
+              <Route path={APP_PATHS.home} element={<Navigate to={APP_PATHS.dashboard} replace />} />
+              <Route path={APP_PATHS.dashboard} element={<CalendarPage currentUser={currentUser} />} />
+              <Route path={APP_PATHS.calendar} element={<CalendarPage currentUser={currentUser} />} />
+              <Route path={APP_PATHS.newJob} element={<JobForm currentUser={currentUser} />} />
+              <Route path={APP_PATHS.jobs} element={<JobsList currentUser={currentUser} />} />
+              <Route path={APP_PATHS.clients} element={<ClientsList currentUser={currentUser} />} />
+              <Route path={APP_PATHS.billing} element={<BillingPage onAccountDeleted={handleAccountDeleted} />} />
+              <Route path="/dashboard" element={<Navigate to={APP_PATHS.dashboard} replace />} />
+              <Route path="/calendar" element={<Navigate to={APP_PATHS.calendar} replace />} />
+              <Route path="/jobs/new" element={<Navigate to={APP_PATHS.newJob} replace />} />
+              <Route path="/jobs" element={<Navigate to={APP_PATHS.jobs} replace />} />
+              <Route path="/clients" element={<Navigate to={APP_PATHS.clients} replace />} />
+              <Route path="/billing" element={<Navigate to={APP_PATHS.billing} replace />} />
               <Route path={PUBLIC_PATHS.privacy} element={<PrivacyPage />} />
               <Route path={PUBLIC_PATHS.support} element={<SupportPage />} />
               <Route path={PUBLIC_PATHS.account} element={<AccountPage onAccountDeleted={handleAccountDeleted} />} />

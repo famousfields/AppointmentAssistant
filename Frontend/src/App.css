@@ -323,6 +323,59 @@
   padding: 24px;
 }
 
+.marketing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: rgba(12, 18, 34, 0.78);
+  box-shadow: var(--shadow-md);
+}
+
+.marketing-nav__brand,
+.marketing-nav__links a {
+  color: var(--text-heading);
+  text-decoration: none;
+}
+
+.marketing-nav__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 700;
+}
+
+.marketing-nav__mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.marketing-nav__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.marketing-nav__links a {
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+}
+
+.marketing-nav__links a:hover {
+  border-color: var(--border-strong);
+}
+
 .landing-hero,
 .landing-section,
 .landing-cta,
@@ -792,6 +845,18 @@
 .landing-footer a {
   color: var(--text-heading);
   text-decoration: none;
+}
+
+.landing-pricing-card__limit {
+  color: var(--text-heading);
+}
+
+.landing-pricing-card__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.45rem;
+  color: var(--text);
 }
 
 .login-card,
@@ -2443,11 +2508,22 @@
     padding: 16px;
   }
 
+  .marketing-nav,
   .landing-hero,
   .landing-section,
   .landing-cta,
   .landing-footer {
     padding: 22px;
+  }
+
+  .marketing-nav {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .marketing-nav__actions,
+  .marketing-nav__actions .landing-primary-cta {
+    width: 100%;
   }
 
   .landing-brand {

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import { GOOGLE_PLAY_URL, PUBLIC_PATHS } from './appInfo'
+import MarketingNav from './MarketingNav'
+import { APP_PATHS, GOOGLE_PLAY_URL, PUBLIC_PATHS } from './appInfo'
 
 const FEATURE_CARDS = [
   {
@@ -45,6 +46,8 @@ export default function LandingScreen({ currentUser }) {
 
   return (
     <div className="landing-page">
+      <MarketingNav currentUser={currentUser} />
+
       <section className="landing-hero">
         <div className="landing-hero__content">
           <div className="landing-brand">
@@ -58,7 +61,7 @@ export default function LandingScreen({ currentUser }) {
             Replace scattered notes, missed callbacks, and manual follow-up with a workspace built for booking work fast, keeping crews informed, and staying on top of the calendar from desktop or mobile.
           </p>
           <div className="landing-hero__actions">
-            <Link className="sidebar-primary-action landing-primary-cta" to={`${PUBLIC_PATHS.login}?mode=create`}>
+            <Link className="sidebar-primary-action landing-primary-cta" to={PUBLIC_PATHS.signup}>
               <span className="sidebar-primary-action-icon">+</span>
               Try The Free Plan
             </Link>
@@ -253,7 +256,7 @@ export default function LandingScreen({ currentUser }) {
           </p>
         </div>
         <div className="landing-cta__actions">
-          <Link className="sidebar-primary-action landing-primary-cta" to={`${PUBLIC_PATHS.login}?mode=create`}>
+          <Link className="sidebar-primary-action landing-primary-cta" to={PUBLIC_PATHS.signup}>
             <span className="sidebar-primary-action-icon">+</span>
             Create Free Account
           </Link>
@@ -270,7 +273,7 @@ export default function LandingScreen({ currentUser }) {
           <a href={PUBLIC_PATHS.support}>Support</a>
           <a href={PUBLIC_PATHS.account}>Account management</a>
         </div>
-        {currentUser ? <Link to="/calendar">Go to your workspace</Link> : null}
+        {currentUser ? <Link to={APP_PATHS.dashboard}>Go to your workspace</Link> : null}
       </footer>
     </div>
   )

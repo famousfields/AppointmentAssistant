@@ -10,10 +10,23 @@ export const GOOGLE_PLAY_URL = String(import.meta.env?.VITE_GOOGLE_PLAY_URL || '
 
 export const PUBLIC_PATHS = {
   home: '/',
+  pricing: '/pricing',
+  features: '/features',
   login: '/login',
+  signup: '/signup',
   privacy: '/privacy',
   support: '/support',
   account: '/account'
+}
+
+export const APP_PATHS = {
+  home: '/app',
+  dashboard: '/app/dashboard',
+  calendar: '/app/calendar',
+  jobs: '/app/jobs',
+  newJob: '/app/jobs/new',
+  clients: '/app/clients',
+  billing: '/app/billing'
 }
 
 export const getPublicAppUrl = (path = '') => {

@@ -3,12 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 
 import { API_BASE } from './api'
-import { PUBLIC_PATHS } from './appInfo'
+import { APP_PATHS, PUBLIC_PATHS } from './appInfo'
 
-export default function LoginPage({ onLogin }) {
+export default function LoginPage({ onLogin, defaultMode = 'login' }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const initialMode = new URLSearchParams(location.search).get('mode') === 'create' ? 'create' : 'login'
+  const initialMode = new URLSearchParams(location.search).get('mode') === 'create' ? 'create' : defaultMode
   const [formMode, setFormMode] = useState(initialMode)
   const [formData, setFormData] = useState({
     displayName: '',
@@ -119,7 +119,7 @@ export default function LoginPage({ onLogin }) {
           user: userPayload,
           accessToken: payload.accessToken
         })
-        navigate('/calendar')
+        navigate(APP_PATHS.dashboard)
       }
     } catch (error) {
       setStatus({ type: 'error', message: error.message || 'Unable to reach the server' })
