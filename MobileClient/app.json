@@ -23,7 +23,7 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.anonymous.appointmentassistantmobile",
+      "package": "com.appointmentassistant.mobile",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a0f1d"

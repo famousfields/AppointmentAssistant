@@ -1,0 +1,15 @@
+.expo/
+/node_modules/
+/.vscode/
+
+# Local Gradle outputs can cache absolute native-module paths.
+/android/.gradle/
+/android/.kotlin/
+/android/.cxx/
+/android/build/
+/android/app/.cxx/
+/android/app/build/
+
+*.log
+*.env
+*.expo-shared/*
