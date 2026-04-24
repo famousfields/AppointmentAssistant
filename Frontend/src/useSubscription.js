@@ -60,6 +60,23 @@ export default function useSubscription(currentUser, fetchWithAuth) {
     [fetchWithAuth]
   )
 
+  const openBillingPortal = useCallback(async () => {
+    const response = await fetchWithAuth('/billing/portal-session', {
+      method: 'POST'
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to open billing portal')
+    }
+
+    if (payload.subscription) {
+      setSummary(payload.subscription)
+    }
+
+    return payload
+  }, [fetchWithAuth])
+
   useEffect(() => {
     refreshSubscription()
   }, [refreshSubscription])
@@ -69,6 +86,7 @@ export default function useSubscription(currentUser, fetchWithAuth) {
     loading,
     error,
     refreshSubscription,
-    changePlan
+    changePlan,
+    openBillingPortal
   }
 }

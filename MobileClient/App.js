@@ -1190,6 +1190,40 @@ export default function App() {
     }
   }
 
+  const openBillingPortal = async () => {
+    if (!session) throw new Error('Please sign in to manage billing')
+
+    setBillingSavingPlanCode('portal')
+    setBillingStatus('')
+    try {
+      const response = await apiFetch('/billing/portal-session', {
+        method: 'POST',
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        onSessionChange: setSession
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload.error || payload.errors?.[0]?.msg || 'Unable to open billing portal')
+      }
+      if (payload.subscription) {
+        setBillingSummary(payload.subscription)
+      }
+      if (payload.portalUrl) {
+        setBillingStatus('Opening Stripe customer portal...')
+        await Linking.openURL(payload.portalUrl)
+        return payload
+      }
+      setBillingStatus(payload.message || 'Billing portal ready')
+      return payload
+    } catch (error) {
+      setBillingStatus(error.message || 'Unable to open billing portal')
+      return null
+    } finally {
+      setBillingSavingPlanCode('')
+    }
+  }
+
   const createJobType = async ({ name, color }) => {
     if (!session) throw new Error('Please sign in to manage job types')
 
@@ -2552,6 +2586,22 @@ export default function App() {
                       <Text style={commonStyles.helperText}>
                         Plan changes save immediately for now while Stripe checkout is still being wired in.
                       </Text>
+                    ) : null}
+                    {billingSummary.checkoutMode !== 'manual_preview' && billingSummary.planCode !== 'free' ? (
+                      <>
+                        <Pressable
+                          style={[commonStyles.button, commonStyles.buttonSecondary]}
+                          onPress={openBillingPortal}
+                          disabled={Boolean(billingSavingPlanCode)}
+                        >
+                          <Text style={commonStyles.buttonText}>
+                            {billingSavingPlanCode === 'portal' ? 'Opening Stripe...' : 'Manage subscription'}
+                          </Text>
+                        </Pressable>
+                        <Text style={commonStyles.helperText}>
+                          Use Stripe to cancel your subscription and stop future billing.
+                        </Text>
+                      </>
                     ) : null}
                     <View style={styles.billingUsageList}>
                       <View style={commonStyles.chip}>

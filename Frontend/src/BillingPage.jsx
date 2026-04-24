@@ -105,7 +105,8 @@ export default function BillingPage({ onAccountDeleted }) {
     subscriptionSummary,
     subscriptionLoading,
     subscriptionError,
-    changePlan
+    changePlan,
+    openBillingPortal
   } = useApi()
   const [status, setStatus] = useState('')
   const [savingPlanCode, setSavingPlanCode] = useState('')
@@ -159,6 +160,25 @@ export default function BillingPage({ onAccountDeleted }) {
     }
   }
 
+  const handleManageSubscription = async () => {
+    setSavingPlanCode('portal')
+    setStatus('')
+
+    try {
+      const payload = await openBillingPortal()
+      if (payload?.portalUrl) {
+        window.location.assign(payload.portalUrl)
+        return
+      }
+
+      setStatus(payload?.message || 'Opened billing portal.')
+    } catch (error) {
+      setStatus(error.message || 'Unable to open the billing portal right now.')
+    } finally {
+      setSavingPlanCode('')
+    }
+  }
+
   if (subscriptionLoading && !subscriptionSummary) {
     return (
       <section className="billing-page">
@@ -196,6 +216,19 @@ export default function BillingPage({ onAccountDeleted }) {
             <strong>{subscriptionSummary.planName}</strong>
             <span>{subscriptionSummary.priceLabel}</span>
             <span>Resets on {formatResetDate(subscriptionSummary.currentPeriodEndsAt)}</span>
+            {subscriptionSummary.checkoutMode !== 'manual_preview' && subscriptionSummary.planCode !== 'free' ? (
+              <>
+                <button
+                  type="button"
+                  className="comments-button comments-button--ghost"
+                  disabled={Boolean(savingPlanCode)}
+                  onClick={handleManageSubscription}
+                >
+                  {savingPlanCode === 'portal' ? 'Opening Stripe...' : 'Manage subscription'}
+                </button>
+                <span>Use Stripe to cancel your subscription and stop future billing.</span>
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>

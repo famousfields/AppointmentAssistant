@@ -287,7 +287,8 @@ function AppContent() {
     loading: subscriptionLoading,
     error: subscriptionError,
     refreshSubscription,
-    changePlan
+    changePlan,
+    openBillingPortal
   } = useSubscription(currentUser, fetchWithAuth)
 
   const handleLogout = async () => {
@@ -338,11 +339,13 @@ function AppContent() {
       subscriptionLoading,
       subscriptionError,
       refreshSubscription,
-      changePlan
+      changePlan,
+      openBillingPortal
     }),
     [
       changePlan,
       fetchWithAuth,
+      openBillingPortal,
       refreshSubscription,
       session,
       subscriptionError,
