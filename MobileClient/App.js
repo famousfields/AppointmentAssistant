@@ -1,4 +1,5 @@
-import { StatusBar } from 'expo-status-bar'
+import 'expo-dev-client'
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
 import {
@@ -13,6 +14,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar as NativeStatusBar,
   Text,
   TextInput,
   View
@@ -52,6 +54,7 @@ const PHONE_EXAMPLE = '(555) 123-4567'
 const KEYBOARD_SCROLL_DELAY_MS = Platform.OS === 'ios' ? 80 : 140
 const AUTH_KEYBOARD_EXTRA_OFFSET = 96
 const WORKSPACE_KEYBOARD_EXTRA_OFFSET = 120
+const DEVICE_STATUS_BAR_OFFSET = Platform.OS === 'android' ? NativeStatusBar.currentHeight || 0 : 0
 const DEFAULT_JOB_DURATION_MINUTES = 60
 const DAY_TIMELINE_DEFAULT_START_HOUR = 8
 const DAY_TIMELINE_DEFAULT_END_HOUR = 18
@@ -2096,31 +2099,49 @@ export default function App() {
     const authHealthMessage = apiHealth.status === 'success' ? 'Backend connected and ready.' : apiHealth.message
     return (
       <SafeAreaView style={[commonStyles.screen, styles.authScreen]}>
-        <StatusBar style="light" />
+        <ExpoStatusBar style="light" />
         <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
           <ScrollView
             ref={authScrollRef}
-            contentContainerStyle={styles.authScrollContent}
+            contentContainerStyle={[
+              styles.authScrollContent,
+              authScreenActive ? styles.authScrollContentForm : null
+            ]}
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
           >
-            <View style={styles.authBackdrop}>
+            <View style={[styles.authBackdrop, authScreenActive ? styles.authBackdropForm : null]}>
               <View style={styles.authGlowTop} />
               <View style={styles.authGlowBottom} />
               <View style={styles.authGrid} />
-              <View style={styles.authHero}>
-                <Text style={styles.authEyebrow}>Mobile scheduling for service teams</Text>
-                <View style={styles.authMonogram}>
-                  <Text style={styles.authMonogramText}>AA</Text>
+              <View style={[styles.authHero, authScreenActive ? styles.authHeroCompact : null]}>
+                <Text style={[styles.authEyebrow, authScreenActive ? styles.authEyebrowCompact : null]}>
+                  Mobile scheduling for service teams
+                </Text>
+                <View style={[styles.authMonogram, authScreenActive ? styles.authMonogramCompact : null]}>
+                  <Text style={[styles.authMonogramText, authScreenActive ? styles.authMonogramTextCompact : null]}>
+                    AA
+                  </Text>
                 </View>
-                <Text style={styles.authWordmarkPrimary}>APPOINTMENT</Text>
-                <Text style={styles.authWordmarkAccent}>ASSISTANT</Text>
-                <Text style={styles.authHeroTitle}>Manage bookings, clients, and calendar updates from one workspace.</Text>
-                <Text style={apiHealth.status === 'error' ? styles.authHeroStatusError : styles.authHeroStatus}>
+                <Text style={[styles.authWordmarkPrimary, authScreenActive ? styles.authWordmarkCompact : null]}>
+                  APPOINTMENT
+                </Text>
+                <Text style={[styles.authWordmarkAccent, authScreenActive ? styles.authWordmarkAccentCompact : null]}>
+                  ASSISTANT
+                </Text>
+                <Text style={[styles.authHeroTitle, authScreenActive ? styles.authHeroTitleCompact : null]}>
+                  Manage bookings, clients, and calendar updates from one workspace.
+                </Text>
+                <Text
+                  style={[
+                    apiHealth.status === 'error' ? styles.authHeroStatusError : styles.authHeroStatus,
+                    authScreenActive ? styles.authHeroStatusCompact : null
+                  ]}
+                >
                   {authHealthMessage}
                 </Text>
               </View>
-              <View style={styles.authSheet}>
+              <View style={[styles.authSheet, authScreenActive ? styles.authSheetForm : null]}>
                 {authScreenActive ? (
                   <View style={styles.authFormWrap}>
                     <View style={styles.authFormHeader}>
@@ -2208,11 +2229,11 @@ export default function App() {
 
   return (
     <SafeAreaView style={commonStyles.screen}>
-      <StatusBar style="light" />
+      <ExpoStatusBar style="light" />
       <KeyboardAvoidingView style={styles.keyboardFrame} behavior={keyboardAvoidingBehavior}>
         <ScrollView
           ref={workspaceScrollRef}
-          contentContainerStyle={commonStyles.content}
+          contentContainerStyle={[commonStyles.content, styles.workspaceContent]}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
           stickyHeaderIndices={[navStickyIndex]}
@@ -3459,11 +3480,17 @@ const styles = StyleSheet.create({
   authScrollContent: {
     flexGrow: 1
   },
+  authScrollContentForm: {
+    paddingTop: DEVICE_STATUS_BAR_OFFSET
+  },
   authBackdrop: {
     flex: 1,
     minHeight: '100%',
     backgroundColor: '#07111f',
     overflow: 'hidden'
+  },
+  authBackdropForm: {
+    justifyContent: 'flex-start'
   },
   authGlowTop: {
     position: 'absolute',
@@ -3504,12 +3531,23 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     gap: 14
   },
+  authHeroCompact: {
+    flex: 0,
+    minHeight: 0,
+    paddingTop: 24,
+    paddingBottom: 14,
+    gap: 6
+  },
   authEyebrow: {
     color: 'rgba(226, 232, 240, 0.9)',
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.4,
     textTransform: 'uppercase'
+  },
+  authEyebrowCompact: {
+    fontSize: 10,
+    lineHeight: 13
   },
   authMonogram: {
     width: 128,
@@ -3526,11 +3564,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 8
   },
+  authMonogramCompact: {
+    width: 62,
+    height: 62,
+    borderRadius: 18
+  },
   authMonogramText: {
     color: '#f8fafc',
     fontSize: 46,
     fontWeight: '900',
     letterSpacing: -2
+  },
+  authMonogramTextCompact: {
+    fontSize: 24,
+    letterSpacing: 0
   },
   authWordmarkPrimary: {
     color: '#f8fafc',
@@ -3538,6 +3585,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 1.6,
     textAlign: 'center'
+  },
+  authWordmarkCompact: {
+    fontSize: 20,
+    lineHeight: 22,
+    letterSpacing: 1
   },
   authWordmarkAccent: {
     color: '#a855f7',
@@ -3547,6 +3599,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: -12
   },
+  authWordmarkAccentCompact: {
+    fontSize: 20,
+    lineHeight: 22,
+    letterSpacing: 1,
+    marginTop: -8
+  },
   authHeroTitle: {
     color: '#e2e8f0',
     fontSize: 28,
@@ -3555,12 +3613,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 360
   },
+  authHeroTitleCompact: {
+    display: 'none'
+  },
   authHeroStatus: {
     color: 'rgba(226, 232, 240, 0.78)',
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
     maxWidth: 320
+  },
+  authHeroStatusCompact: {
+    display: 'none'
   },
   authHeroStatusError: {
     color: '#fda4af',
@@ -3578,6 +3642,11 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 28,
     gap: 18
+  },
+  authSheetForm: {
+    marginTop: 0,
+    paddingTop: 14,
+    paddingBottom: 24
   },
   authCtaStack: {
     gap: 14
@@ -3687,6 +3756,9 @@ const styles = StyleSheet.create({
   },
   keyboardFrame: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  workspaceContent: {
+    paddingTop: DEVICE_STATUS_BAR_OFFSET + 14
+  },
   workspaceOverview: {
     flexDirection: 'row',
     alignItems: 'flex-start',
