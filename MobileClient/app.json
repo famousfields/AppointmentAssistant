@@ -2,7 +2,7 @@
   "expo": {
     "name": "Appointment Assistant",
     "slug": "swift-job-assistant-axion-9f3",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "appointmentassistant",

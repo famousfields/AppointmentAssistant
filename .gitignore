@@ -27,3 +27,8 @@ skills-lock.json
 *.sln
 *.sw?
 .env
+credentials.json
+**/credentials.json
+MobileClient/appointmentassistant-*.json
+*.jks
+*.keystore

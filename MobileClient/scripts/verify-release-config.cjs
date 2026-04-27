@@ -4,6 +4,7 @@ const path = require('node:path')
 const projectRoot = path.resolve(__dirname, '..')
 const appConfigPath = path.join(projectRoot, 'app.json')
 const easConfigPath = path.join(projectRoot, 'eas.json')
+const androidBuildGradlePath = path.join(projectRoot, 'android', 'app', 'build.gradle')
 
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'))
 
@@ -27,6 +28,16 @@ assert(expo.android?.package, 'Expo config must define android.package')
 assert(expo.android?.adaptiveIcon?.foregroundImage, 'Expo config must define android.adaptiveIcon.foregroundImage')
 assert(expo.extra?.eas?.projectId, 'Expo config must define extra.eas.projectId')
 assert(easConfig.build?.production, 'EAS config must define a production build profile')
+
+if (fs.existsSync(androidBuildGradlePath)) {
+  const androidBuildGradle = fs.readFileSync(androidBuildGradlePath, 'utf8')
+  const versionNameMatch = androidBuildGradle.match(/\bversionName\s+["']([^"']+)["']/)
+  assert(versionNameMatch, 'Native Android build.gradle must define versionName')
+  assert(
+    versionNameMatch[1] === expo.version,
+    `Native Android versionName (${versionNameMatch[1]}) must match Expo version (${expo.version})`
+  )
+}
 
 const assetPaths = [
   expo.icon,
