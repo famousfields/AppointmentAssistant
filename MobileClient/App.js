@@ -3009,6 +3009,8 @@ function ClientSuggestions({ clients, query, field, visible, onSelect, onCreateN
 
 function JobTypeField({ label, value, onChange, error, options = [], helperText, onFocus }) {
   const normalizedValue = normalizeJobTypeKey(value)
+  const [pickerVisible, setPickerVisible] = useState(false)
+  const hasExistingOptions = options.length > 0
 
   return (
     <View>
@@ -3021,24 +3023,44 @@ function JobTypeField({ label, value, onChange, error, options = [], helperText,
         helperText={helperText}
         error={error}
       />
-      {options.length > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View style={styles.jobTypeSuggestionRow}>
-            {options.map((jobType) => {
-              const name = jobType.name || ''
-              const active = Boolean(normalizedValue) && normalizeJobTypeKey(name) === normalizedValue
-              return (
-                <Pressable
-                  key={jobType.id || name}
-                  style={[styles.jobTypeSuggestionChip, active ? styles.jobTypeSuggestionChipActive : null]}
-                  onPress={() => onChange(name)}
-                >
-                  <Text style={styles.jobTypeSuggestionText} numberOfLines={1}>{name}</Text>
+      {hasExistingOptions ? (
+        <>
+          <Pressable
+            style={styles.jobTypePickerButton}
+            onPress={() => setPickerVisible(true)}
+          >
+            <Text style={styles.jobTypePickerButtonText}>Select from existing job types</Text>
+          </Pressable>
+          <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
+            <View style={styles.modalBackdrop}>
+              <View style={styles.dateModalPanel}>
+                <Text style={commonStyles.sectionTitle}>Select job type</Text>
+                <Text style={commonStyles.text}>Choose a saved job type or close this list to enter a new one.</Text>
+                <ScrollView style={styles.optionList} keyboardShouldPersistTaps="handled">
+                  {options.map((jobType) => {
+                    const name = jobType.name || ''
+                    const active = Boolean(normalizedValue) && normalizeJobTypeKey(name) === normalizedValue
+                    return (
+                      <Pressable
+                        key={jobType.id || name}
+                        style={[styles.optionRow, active ? styles.optionRowActive : null]}
+                        onPress={() => {
+                          onChange(name)
+                          setPickerVisible(false)
+                        }}
+                      >
+                        <Text style={styles.optionText}>{name}</Text>
+                      </Pressable>
+                    )
+                  })}
+                </ScrollView>
+                <Pressable style={[commonStyles.button, commonStyles.buttonSecondary]} onPress={() => setPickerVisible(false)}>
+                  <Text style={commonStyles.buttonText}>Close</Text>
                 </Pressable>
-              )
-            })}
-          </View>
-        </ScrollView>
+              </View>
+            </View>
+          </Modal>
+        </>
       ) : null}
     </View>
   )
@@ -4351,30 +4373,21 @@ const styles = StyleSheet.create({
     borderColor: colors.heading,
     transform: [{ scale: 1.08 }]
   },
-  jobTypeSuggestionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 8,
-    paddingRight: 8
-  },
-  jobTypeSuggestionChip: {
-    minHeight: 36,
-    maxWidth: 180,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+  jobTypePickerButton: {
+    alignSelf: 'flex-start',
+    minHeight: 40,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: colors.borderStrong,
+    backgroundColor: 'rgba(109, 124, 255, 0.14)',
     alignItems: 'center',
     justifyContent: 'center'
   },
-  jobTypeSuggestionChipActive: {
-    borderColor: colors.borderStrong,
-    backgroundColor: 'rgba(109, 124, 255, 0.18)'
-  },
-  jobTypeSuggestionText: {
+  jobTypePickerButtonText: {
     color: colors.heading,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800'
   },
   jobTypeActionRow: {
