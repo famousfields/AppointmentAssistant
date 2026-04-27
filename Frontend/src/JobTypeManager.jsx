@@ -12,6 +12,8 @@ export default function JobTypeManager({
   error = '',
   disabled = false,
   disabledMessage = 'Log in to manage job types.',
+  limit = null,
+  limitMessage = '',
   onCreate,
   onUpdate,
   onDelete
@@ -22,6 +24,7 @@ export default function JobTypeManager({
   const [saving, setSaving] = useState(false)
 
   const sortedJobTypes = useMemo(() => getJobTypeOptions(jobTypes), [jobTypes])
+  const limitReached = limit !== null && limit !== undefined && sortedJobTypes.length >= Number(limit)
 
   const handleEdit = (jobType) => {
     setEditingId(jobType.id)
@@ -43,6 +46,11 @@ export default function JobTypeManager({
     const name = normalizeJobTypeName(draft.name)
     if (!name) {
       setSubmitError('Enter a job type name')
+      return
+    }
+
+    if (!editingId && limitReached) {
+      setSubmitError(`Free accounts can keep up to ${limit} custom job types. Upgrade to Starter for unlimited job types.`)
       return
     }
 
@@ -87,6 +95,7 @@ export default function JobTypeManager({
         <div>
           <h3>Job types</h3>
           <p>Define the work labels your business uses and choose the color that appears in the calendar.</p>
+          {limitMessage ? <p className="job-types-panel__limit">{limitMessage}</p> : null}
         </div>
         {editingId ? (
           <button type="button" className="comments-button comments-button--ghost" onClick={handleReset} disabled={saving || disabled}>
@@ -111,8 +120,11 @@ export default function JobTypeManager({
                 value={draft.name}
                 onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
                 placeholder="Mulch installation"
-                disabled={saving}
+                disabled={saving || (!editingId && limitReached)}
               />
+              {!editingId && limitReached ? (
+                <p className="form-hint">Free accounts can keep up to {limit} custom job types. Edit or delete an unused type, or upgrade for unlimited job types.</p>
+              ) : null}
             </div>
 
             <div className="form-group">
@@ -124,13 +136,13 @@ export default function JobTypeManager({
                   value={normalizeJobTypeColor(draft.color) || '#6d7cff'}
                   onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))}
                   aria-label="Choose job type color"
-                  disabled={saving}
+                  disabled={saving || (!editingId && limitReached)}
                 />
                 <span className="job-types-color-label">{normalizeJobTypeColor(draft.color) || '#6d7cff'}</span>
               </div>
             </div>
 
-            <button type="submit" className="comments-button" disabled={saving}>
+            <button type="submit" className="comments-button" disabled={saving || (!editingId && limitReached)}>
               {editingId ? 'Save job type' : 'Add job type'}
             </button>
 

@@ -1,12 +1,3 @@
-export const DEFAULT_JOB_TYPES = [
-  { name: '0 Turn Mower', color: '#22c55e', sort_order: 0 },
-  { name: 'Push Mower', color: '#f97316', sort_order: 1 },
-  { name: 'Riding Mower', color: '#3b82f6', sort_order: 2 },
-  { name: 'Pressure Washer', color: '#06b6d4', sort_order: 3 }
-]
-
-export const JOB_TYPE_OPTIONS = DEFAULT_JOB_TYPES.map((type) => type.name)
-
 const JOB_TYPE_COLOR_PATTERN = /^#([0-9a-fA-F]{6})$/
 
 export const normalizeJobTypeName = (value) => String(value || '').trim()

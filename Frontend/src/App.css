@@ -896,6 +896,13 @@
   gap: 16px;
 }
 
+.job-types-panel__limit {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .job-types-form {
   display: grid;
   gap: 14px;
@@ -3001,6 +3008,13 @@
   min-width: 0;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.guided-field__subcopy {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .guided-field__body {

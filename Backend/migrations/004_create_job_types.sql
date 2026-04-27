@@ -20,16 +20,26 @@ ALTER TABLE Jobs
     FOREIGN KEY (job_type_id) REFERENCES job_types(id) ON DELETE SET NULL;
 
 INSERT INTO job_types (user_id, name, normalized_name, color, sort_order)
-SELECT u.id, defaults.name, LOWER(defaults.name), defaults.color, defaults.sort_order
-FROM users u
-JOIN (
-  SELECT 0 AS sort_order, '0 Turn Mower' AS name, '#22c55e' AS color
-  UNION ALL SELECT 1, 'Push Mower', '#f97316'
-  UNION ALL SELECT 2, 'Riding Mower', '#3b82f6'
-  UNION ALL SELECT 3, 'Pressure Washer', '#06b6d4'
-) AS defaults
+SELECT source.user_id, source.name, source.normalized_name, '#6d7cff', source.sort_order
+FROM (
+  SELECT
+    grouped.user_id,
+    grouped.name,
+    grouped.normalized_name,
+    ROW_NUMBER() OVER (PARTITION BY grouped.user_id ORDER BY grouped.normalized_name) - 1 AS sort_order
+  FROM (
+    SELECT
+      user_id,
+      MIN(TRIM(job_type)) AS name,
+      LOWER(TRIM(job_type)) AS normalized_name
+    FROM Jobs
+    WHERE user_id IS NOT NULL
+      AND TRIM(COALESCE(job_type, '')) <> ''
+    GROUP BY user_id, LOWER(TRIM(job_type))
+  ) AS grouped
+) AS source
 LEFT JOIN job_types jt
-  ON jt.user_id = u.id AND jt.normalized_name = LOWER(defaults.name)
+  ON jt.user_id = source.user_id AND jt.normalized_name = source.normalized_name
 WHERE jt.id IS NULL;
 
 UPDATE Jobs j

@@ -42,7 +42,7 @@ const NAV_ITEMS = [
 ]
 
 const JOB_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed', 'Cancelled']
-const JOB_TYPE_OPTIONS = ['0 Turn Mower', 'Push Mower', 'Riding Mower', 'Pressure Washer']
+const FREE_JOB_TYPE_LIMIT = 4
 const JOB_TYPE_COLOR_PRESETS = ['#22c55e', '#f97316', '#3b82f6', '#06b6d4', '#8b5cf6', '#f43f5e', '#eab308', '#14b8a6']
 const CALENDAR_VIEWS = [
   { key: 'day', label: 'Daily' },
@@ -61,11 +61,6 @@ const DAY_TIMELINE_DEFAULT_END_HOUR = 18
 const DAY_TIMELINE_MIN_VISIBLE_HOURS = 8
 const DAY_TIMELINE_ROW_HEIGHT = 76
 const DAY_TIMELINE_MIN_CARD_HEIGHT = 56
-const JOB_TYPE_DEFAULTS = JOB_TYPE_OPTIONS.map((name, index) => ({
-  name,
-  color: JOB_TYPE_COLOR_PRESETS[index],
-  sort_order: index
-}))
 const SELF_SERVE_PLAN_CODES = ['free', 'starter', 'team', 'pro']
 const DEFAULT_BILLING_PLANS = [
   {
@@ -80,6 +75,7 @@ const DEFAULT_BILLING_PLANS = [
       '1 user',
       '10 new clients per month',
       '25 new jobs per month',
+      `Up to ${FREE_JOB_TYPE_LIMIT} custom job types`,
       'Calendar, clients, notes, and payment tracking'
     ],
     canSelfServe: true
@@ -95,7 +91,7 @@ const DEFAULT_BILLING_PLANS = [
     features: [
       '1 user',
       'Unlimited clients and jobs',
-      'Custom job types and calendar colors',
+      'Unlimited custom job types and calendar colors',
       'Core scheduling workflow'
     ],
     canSelfServe: true
@@ -1053,8 +1049,7 @@ export default function App() {
       }))
   }, [jobs])
   const jobTypeOptions = useMemo(() => {
-    const source = jobTypes.length > 0 ? jobTypes : JOB_TYPE_DEFAULTS
-    return [...source].sort((first, second) => {
+    return [...jobTypes].sort((first, second) => {
       const firstOrder = Number(first.sort_order ?? 0)
       const secondOrder = Number(second.sort_order ?? 0)
       if (firstOrder !== secondOrder) return firstOrder - secondOrder
@@ -1062,6 +1057,20 @@ export default function App() {
     })
   }, [jobTypes])
   const canManageJobTypes = billingSummary?.entitlements?.canManageJobTypes ?? true
+  const jobTypeLimit = billingSummary?.entitlements?.jobTypeLimit
+  const jobTypeLimitReached = jobTypeLimit !== null && jobTypeLimit !== undefined && jobTypes.length >= Number(jobTypeLimit)
+  const jobTypeLimitMessage =
+    jobTypeLimit === undefined
+      ? ''
+      : jobTypeLimit === null
+        ? 'Starter and above include unlimited custom job types.'
+        : `${jobTypes.length}/${jobTypeLimit} Free custom job types used. Starter and above include unlimited job types.`
+  const jobTypeInputHelper =
+    jobTypeLimitReached
+      ? `Free job type limit reached. Select an existing job type or upgrade for unlimited job types.`
+      : jobTypes.length === 0
+      ? 'Enter your first job type. Free includes up to 4 custom job types.'
+      : 'Type a new job type or choose an existing one below.'
   const creationBlocked = billingSummary?.entitlements?.creationBlocked ?? false
   const billingPlans = billingSummary?.plans?.length ? billingSummary.plans : DEFAULT_BILLING_PLANS
 
@@ -1312,7 +1321,12 @@ export default function App() {
 
   const submitJobTypeDraft = async () => {
     if (!canManageJobTypes) {
-      setJobTypeFormError('Custom job types unlock on Starter and above.')
+      setJobTypeFormError('Job type management is unavailable for this workspace.')
+      return
+    }
+
+    if (!jobTypeEditingId && jobTypeLimitReached) {
+      setJobTypeFormError(`Free accounts can keep up to ${jobTypeLimit} custom job types. Edit or delete an unused type, or upgrade to Starter for unlimited job types.`)
       return
     }
 
@@ -1341,7 +1355,7 @@ export default function App() {
 
   const removeJobType = async (jobType) => {
     if (!canManageJobTypes) {
-      setJobTypeFormError('Custom job types unlock on Starter and above.')
+      setJobTypeFormError('Job type management is unavailable for this workspace.')
       return
     }
 
@@ -1381,8 +1395,15 @@ export default function App() {
       }
       case 'address':
         return value.trim().length >= 5 ? '' : 'Enter a fuller address so the job location is clear.'
-      case 'jobType':
-        return value.trim().length > 0 ? '' : 'Job type is required.'
+      case 'jobType': {
+        const trimmed = value.trim()
+        if (!trimmed) return 'Job type is required.'
+        const matchesExistingJobType = jobTypeOptions.some((jobType) => normalizeJobTypeKey(jobType.name) === normalizeJobTypeKey(trimmed))
+        if (jobTypeLimitReached && !matchesExistingJobType) {
+          return `Free accounts can keep up to ${jobTypeLimit} custom job types. Choose an existing type or upgrade for unlimited job types.`
+        }
+        return ''
+      }
       case 'jobDate':
         return parseDateValue(value) ? '' : 'Pick a valid date for this appointment.'
       case 'startTime':
@@ -2381,11 +2402,11 @@ export default function App() {
                 title="Enter job details"
                 description="Set the type of work, the price, and the notes that make the job operationally clear."
               >
-                <SelectField label="Job type" value={jobForm.jobType} onChange={(value) => {
+                <JobTypeField label="Job type" value={jobForm.jobType} onChange={(value) => {
                   setJobForm((current) => ({ ...current, jobType: value }))
                   setJobErrors((current) => ({ ...current, jobType: '' }))
                   setJobStatus(null)
-                }} error={jobErrors.jobType} options={jobTypeOptions.map((jobType) => jobType.name)} />
+                }} error={jobErrors.jobType} options={jobTypeOptions} onFocus={handleWorkspaceInputFocus} helperText={jobTypeInputHelper} />
                 <CurrencyField label="Quoted amount" value={jobForm.payment} onFocus={handleWorkspaceInputFocus} onChangeText={(value) => {
                   setJobForm((current) => ({ ...current, payment: value }))
                   setJobErrors((current) => ({ ...current, payment: '' }))
@@ -2434,13 +2455,14 @@ export default function App() {
                 <Text style={commonStyles.text}>
                   Define the labels your business uses and choose the color that appears in the calendar.
                 </Text>
+                {jobTypeLimitMessage ? <Text style={commonStyles.helperText}>{jobTypeLimitMessage}</Text> : null}
                 {!canManageJobTypes ? (
                   <View style={styles.jobTypesLockedCard}>
                     <Text style={commonStyles.errorText}>
-                      Custom job types and color management unlock on Starter and above.
+                      Job type management is unavailable for this workspace.
                     </Text>
                     <Text style={commonStyles.helperText}>
-                      Purchase the Starter plan or above to create custom job types and colors.
+                      Contact support if you expected to manage custom job types.
                     </Text>
                     {jobTypesError ? <Text style={commonStyles.errorText}>{jobTypesError}</Text> : null}
                   </View>
@@ -2455,6 +2477,8 @@ export default function App() {
                         setJobTypeFormError('')
                       }}
                       placeholder="Mulch installation"
+                      editable={!jobTypeSaving && (Boolean(jobTypeEditingId) || !jobTypeLimitReached)}
+                      helperText={!jobTypeEditingId && jobTypeLimitReached ? `Free accounts can keep up to ${jobTypeLimit} custom job types. Edit or delete an unused type, or upgrade for unlimited job types.` : ''}
                     />
                     <Text style={commonStyles.label}>Color</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -2469,7 +2493,7 @@ export default function App() {
                                 setJobTypeDraft((current) => ({ ...current, color }))
                                 setJobTypeFormError('')
                               }}
-                              disabled={jobTypeSaving}
+                              disabled={jobTypeSaving || (!jobTypeEditingId && jobTypeLimitReached)}
                             />
                           )
                         })}
@@ -2485,6 +2509,7 @@ export default function App() {
                       }}
                       placeholder="#6d7cff"
                       placeholderTextColor={colors.textMuted}
+                      editable={!jobTypeSaving && (Boolean(jobTypeEditingId) || !jobTypeLimitReached)}
                     />
                     <View style={styles.jobTypeActionRow}>
                       {jobTypeEditingId ? (
@@ -2499,7 +2524,7 @@ export default function App() {
                       <Pressable
                         style={[commonStyles.button, commonStyles.buttonPrimary, styles.jobTypeActionButton]}
                         onPress={submitJobTypeDraft}
-                        disabled={jobTypeSaving}
+                        disabled={jobTypeSaving || (!jobTypeEditingId && jobTypeLimitReached)}
                       >
                         <Text style={commonStyles.buttonText}>{jobTypeSaving ? 'Saving...' : jobTypeEditingId ? 'Save job type' : 'Add job type'}</Text>
                       </Pressable>
@@ -2982,6 +3007,43 @@ function ClientSuggestions({ clients, query, field, visible, onSelect, onCreateN
   )
 }
 
+function JobTypeField({ label, value, onChange, error, options = [], helperText, onFocus }) {
+  const normalizedValue = normalizeJobTypeKey(value)
+
+  return (
+    <View>
+      <FormField
+        label={label}
+        value={value}
+        onFocus={onFocus}
+        onChangeText={onChange}
+        placeholder={options.length > 0 ? 'Enter or select a job type' : 'Enter a job type'}
+        helperText={helperText}
+        error={error}
+      />
+      {options.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <View style={styles.jobTypeSuggestionRow}>
+            {options.map((jobType) => {
+              const name = jobType.name || ''
+              const active = Boolean(normalizedValue) && normalizeJobTypeKey(name) === normalizedValue
+              return (
+                <Pressable
+                  key={jobType.id || name}
+                  style={[styles.jobTypeSuggestionChip, active ? styles.jobTypeSuggestionChipActive : null]}
+                  onPress={() => onChange(name)}
+                >
+                  <Text style={styles.jobTypeSuggestionText} numberOfLines={1}>{name}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        </ScrollView>
+      ) : null}
+    </View>
+  )
+}
+
 function CurrencyField({ label, error, ...props }) {
   return (
     <View>
@@ -3176,7 +3238,7 @@ function TimeField({ label, value, onChange, error }) {
         <Text style={value ? styles.dateFieldText : styles.dateFieldPlaceholder}>
           {value ? formatTimeRange(value) : 'Select a start time'}
         </Text>
-        <Text style={styles.dateFieldHint}>{value || 'HH:MM'}</Text>
+        <Text style={styles.dateFieldHint}>{value ? `Start time: ${value}` : 'HH:MM'}</Text>
       </Pressable>
       <Text style={commonStyles.helperText}>Each job reserves one hour starting at this time.</Text>
       {error ? <Text style={commonStyles.errorText}>{error}</Text> : null}
@@ -3348,7 +3410,12 @@ function JobModal({ job, clients, jobTypes = [], onClose, onSave, onDelete }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [suggestionField, setSuggestionField] = useState(null)
-  const jobTypeOptions = jobTypes.length > 0 ? jobTypes : JOB_TYPE_DEFAULTS
+  const jobTypeOptions = useMemo(() => [...jobTypes].sort((first, second) => {
+    const firstOrder = Number(first.sort_order ?? 0)
+    const secondOrder = Number(second.sort_order ?? 0)
+    if (firstOrder !== secondOrder) return firstOrder - secondOrder
+    return normalizeJobTypeName(first.name).localeCompare(normalizeJobTypeName(second.name))
+  }), [jobTypes])
 
   useEffect(() => {
     if (!job) {
@@ -3444,7 +3511,7 @@ function JobModal({ job, clients, jobTypes = [], onClose, onSave, onDelete }) {
                   setSuggestionField(null)
                 }}
               />
-              <SelectField label="Job type" value={formState?.jobType || ''} onChange={(value) => setFormState((current) => ({ ...current, jobType: value }))} options={jobTypeOptions.map((jobType) => jobType.name)} />
+              <JobTypeField label="Job type" value={formState?.jobType || ''} onChange={(value) => setFormState((current) => ({ ...current, jobType: value }))} options={jobTypeOptions} helperText={jobTypeOptions.length > 0 ? 'Type a new job type or choose an existing one below.' : 'Enter a job type for this job.'} />
               <DateField label="Date" value={formState?.jobDate || ''} onChange={(value) => setFormState((current) => ({ ...current, jobDate: value }))} />
               <TimeField label="Start time" value={formState?.startTime || ''} onChange={(value) => setFormState((current) => ({ ...current, startTime: value }))} />
               <SelectField label="Status" value={formState?.status || ''} onChange={(value) => setFormState((current) => ({ ...current, status: value }))} options={JOB_STATUS_OPTIONS} />
@@ -4283,6 +4350,32 @@ const styles = StyleSheet.create({
   colorPresetActive: {
     borderColor: colors.heading,
     transform: [{ scale: 1.08 }]
+  },
+  jobTypeSuggestionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingTop: 8,
+    paddingRight: 8
+  },
+  jobTypeSuggestionChip: {
+    minHeight: 36,
+    maxWidth: 180,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  jobTypeSuggestionChipActive: {
+    borderColor: colors.borderStrong,
+    backgroundColor: 'rgba(109, 124, 255, 0.18)'
+  },
+  jobTypeSuggestionText: {
+    color: colors.heading,
+    fontSize: 12,
+    fontWeight: '800'
   },
   jobTypeActionRow: {
     flexDirection: 'row',
