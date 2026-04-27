@@ -2,7 +2,7 @@ import { useApi } from './apiContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useJobTypes from './useJobTypes'
-import { buildJobTypeSuggestionSet } from './jobTypes'
+import { buildJobTypeSuggestionSet, normalizeJobTypeKey } from './jobTypes'
 import ClientSuggestions from './ClientSuggestions'
 import {
   applyClientSuggestion,
@@ -142,12 +142,22 @@ export default function JobForm({ currentUser }) {
   } = useJobTypes(currentUser)
   const jobTypeSuggestions = useMemo(() => buildJobTypeSuggestionSet(jobTypes), [jobTypes])
   const canManageJobTypes = subscriptionSummary?.entitlements?.canManageJobTypes ?? true
+  const jobTypeLimit = subscriptionSummary?.entitlements?.jobTypeLimit
+  const jobTypeLimitReached = jobTypeLimit !== null && jobTypeLimit !== undefined && jobTypes.length >= Number(jobTypeLimit)
+  const freeJobTypeCountLabel =
+    jobTypeLimit === undefined
+      ? ''
+      : jobTypeLimit === null
+        ? 'Starter and above include unlimited custom job types.'
+        : `${jobTypes.length}/${jobTypeLimit} Free custom job types used. Starter and above include unlimited job types.`
+  const jobTypeInputHint =
+    jobTypeLimitReached
+      ? 'Free job type limit reached. Choose an existing job type or upgrade for unlimited job types.'
+      : jobTypes.length === 0
+      ? 'Enter your first job type. Free includes up to 4 custom job types.'
+      : 'Type a new job type or choose an existing one.'
   const creationBlocked = subscriptionSummary?.entitlements?.creationBlocked ?? false
-  const jobTypePanelError =
-    jobTypesError ||
-    (!canManageJobTypes && currentUser
-      ? 'Custom job types and color management unlock on Starter and above.'
-      : '')
+  const jobTypePanelError = jobTypesError || ''
 
   const validateField = (name, value) => {
     switch (name) {
@@ -164,6 +174,12 @@ export default function JobForm({ currentUser }) {
         return ''
       case 'jobType':
         if (!value || value.trim().length === 0) return 'Job type is required'
+        if (
+          jobTypeLimitReached &&
+          !jobTypeSuggestions.some((jobType) => normalizeJobTypeKey(jobType) === normalizeJobTypeKey(value))
+        ) {
+          return `Free accounts can keep up to ${jobTypeLimit} custom job types. Choose an existing type or upgrade for unlimited job types.`
+        }
         return ''
       case 'jobDate':
         if (!value) return 'Date is required'
@@ -573,7 +589,7 @@ export default function JobForm({ currentUser }) {
                       <GuidedField
                         id="jobType"
                         label="Job type"
-                        hint="Business label"
+                        hint={jobTypes.length === 0 ? 'Enter one' : 'Type or choose'}
                         icon="JT"
                         error={errors.jobType}
                       >
@@ -593,6 +609,7 @@ export default function JobForm({ currentUser }) {
                             <option key={jobType} value={jobType} />
                           ))}
                         </datalist>
+                        <div className="guided-field__subcopy">{jobTypeInputHint}</div>
                       </GuidedField>
 
                       <GuidedField
@@ -777,8 +794,10 @@ export default function JobForm({ currentUser }) {
             disabledMessage={
               !currentUser
                 ? 'Log in to manage job types.'
-                : 'Purchase the Starter plan or above to create custom job types and colors.'
+                : 'Job type management is unavailable for this workspace.'
             }
+            limit={jobTypeLimit}
+            limitMessage={currentUser ? freeJobTypeCountLabel : ''}
             onCreate={createJobType}
             onUpdate={updateJobType}
             onDelete={deleteJobType}

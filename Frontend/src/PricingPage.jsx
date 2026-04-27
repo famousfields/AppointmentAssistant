@@ -7,7 +7,7 @@ const PLANS = [
     name: 'Free',
     price: '$0',
     description: 'Best for trying the workflow and getting a small operation organized.',
-    limits: '10 new clients and 25 new jobs each month',
+    limits: '10 new clients, 25 new jobs, and 4 custom job types',
     features: ['1 user', 'Calendar, clients, jobs, and notes', 'Desktop and mobile access']
   },
   {
@@ -15,7 +15,7 @@ const PLANS = [
     price: '$14.99/mo',
     description: 'Good for solo operators who need unlimited records and custom job types.',
     limits: 'Unlimited clients and jobs',
-    features: ['1 user', 'Custom job types and colors', 'Billing-ready upgrade path']
+    features: ['1 user', 'Unlimited custom job types and colors', 'Billing-ready upgrade path']
   },
   {
     name: 'Team',

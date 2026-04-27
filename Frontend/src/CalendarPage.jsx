@@ -2,7 +2,7 @@ import { useApi } from './apiContext'
 import { useEffect, useMemo, useState } from 'react'
 import JobEditorModal from './JobEditorModal'
 import { buildClients } from './clientUtils'
-import { DEFAULT_JOB_TYPES, getJobTypeOptions, getJobTypePalette } from './jobTypes'
+import { getJobTypeOptions, getJobTypePalette } from './jobTypes'
 import useJobTypes from './useJobTypes'
 import { parseDateValue } from './dateUtils'
 import { EmptyState, JobStatusChips, MetricCard, SectionCard } from './productUi'
@@ -952,7 +952,7 @@ export default function CalendarPage({ currentUser }) {
       </div>
 
       <div className="calendar-legend">
-        {getJobTypeOptions(jobTypes.length > 0 ? jobTypes : DEFAULT_JOB_TYPES).map((jobType) => (
+        {getJobTypeOptions(jobTypes).map((jobType) => (
           <div key={jobType.id || jobType.name} className="calendar-legend-item">
             <span
               className="calendar-legend-swatch"

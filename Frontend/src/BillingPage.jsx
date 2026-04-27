@@ -16,6 +16,7 @@ const DEFAULT_BILLING_PLANS = [
       '1 user',
       '10 new clients per month',
       '25 new jobs per month',
+      'Up to 4 custom job types',
       'Calendar, clients, notes, and payment tracking'
     ],
     canSelfServe: true
@@ -31,7 +32,7 @@ const DEFAULT_BILLING_PLANS = [
     features: [
       '1 user',
       'Unlimited clients and jobs',
-      'Custom job types and calendar colors',
+      'Unlimited custom job types and calendar colors',
       'Core scheduling workflow'
     ],
     canSelfServe: true

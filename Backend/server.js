@@ -25,14 +25,8 @@ const { body, validationResult } = require("express-validator");
 
 const app = express();
 const START_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
-const JOB_TYPE_NAME_PATTERN = /^.{2,120}$/;
 const JOB_TYPE_COLOR_PATTERN = /^#([0-9a-fA-F]{6})$/;
-const DEFAULT_JOB_TYPES = [
-  { name: "0 Turn Mower", color: "#22c55e", sortOrder: 0 },
-  { name: "Push Mower", color: "#f97316", sortOrder: 1 },
-  { name: "Riding Mower", color: "#3b82f6", sortOrder: 2 },
-  { name: "Pressure Washer", color: "#06b6d4", sortOrder: 3 }
-];
+const FREE_JOB_TYPE_LIMIT = 4;
 const SUBSCRIPTION_PLAN_CATALOG = [
   {
     code: "free",
@@ -47,6 +41,7 @@ const SUBSCRIPTION_PLAN_CATALOG = [
       "1 user",
       "10 new clients per month",
       "25 new jobs per month",
+      `Up to ${FREE_JOB_TYPE_LIMIT} custom job types`,
       "Calendar, clients, notes, and payment tracking"
     ]
   },
@@ -62,7 +57,7 @@ const SUBSCRIPTION_PLAN_CATALOG = [
     features: [
       "1 user",
       "Unlimited clients and jobs",
-      "Custom job types and calendar colors",
+      "Unlimited custom job types and calendar colors",
       "Core scheduling workflow"
     ]
   },
@@ -325,6 +320,8 @@ const addMonthsKeepingDay = (value, amount) => {
 
 const getPlanDefinition = (planCode) => SUBSCRIPTION_PLAN_MAP.get(planCode) || SUBSCRIPTION_PLAN_MAP.get("free");
 
+const getJobTypeLimitForPlan = (plan) => (plan.code === "free" ? FREE_JOB_TYPE_LIMIT : null);
+
 const serializePlanDefinition = (plan) => ({
   code: plan.code,
   name: plan.name,
@@ -342,6 +339,7 @@ const buildSubscriptionSummary = (row) => {
   const plan = getPlanDefinition(row?.plan_code);
   const monthlyClientLimit = plan.monthlyClientLimit;
   const monthlyJobLimit = plan.monthlyJobLimit;
+  const jobTypeLimit = getJobTypeLimitForPlan(plan);
   const monthlyClientCreations = Number(row?.monthly_client_creations || 0);
   const monthlyJobCreations = Number(row?.monthly_job_creations || 0);
   const monthlyClientRemaining =
@@ -372,31 +370,15 @@ const buildSubscriptionSummary = (row) => {
       monthlyJobRemaining
     },
     entitlements: {
-      canManageJobTypes: plan.level >= getPlanDefinition("starter").level,
+      canManageJobTypes: true,
+      jobTypeLimit,
+      hasUnlimitedJobTypes: jobTypeLimit === null,
       hasUnlimitedRecords: monthlyClientLimit === null && monthlyJobLimit === null,
       creationBlocked
     },
     checkoutMode: BILLING_CHECKOUT_MODE,
     plans: SUBSCRIPTION_PLAN_CATALOG.map(serializePlanDefinition)
   };
-};
-
-const seedDefaultJobTypesForUser = async (userId) => {
-  const values = DEFAULT_JOB_TYPES.map((type) => [
-    userId,
-    type.name,
-    normalizeJobTypeKey(type.name),
-    type.color,
-    type.sortOrder
-  ]);
-
-  await db.promise().query(
-    `
-      INSERT IGNORE INTO job_types (user_id, name, normalized_name, color, sort_order)
-      VALUES ?
-    `,
-    [values]
-  );
 };
 
 const seedDefaultSubscriptionForUser = async (userId) => {
@@ -614,7 +596,7 @@ const ensurePlanAllowsJobTypeManagement = async (userId) => {
   }
 
   const error = new Error(
-    "Custom job types and color management are available on Starter and above. Upgrade to unlock business-specific job types."
+    "Job type management is unavailable for this workspace."
   );
   error.statusCode = 403;
   error.code = "FEATURE_NOT_AVAILABLE";
@@ -757,6 +739,35 @@ const fetchJobTypeByName = async (userId, jobTypeName) => {
   return row || null;
 };
 
+const countJobTypesForUser = async (userId) => {
+  const [[row]] = await db.promise().query(
+    `
+      SELECT COUNT(*) AS count
+      FROM job_types
+      WHERE user_id = ?
+    `,
+    [userId]
+  );
+
+  return Number(row?.count || 0);
+};
+
+const assertCanCreateJobType = async (subscriptionContext, userId) => {
+  const limit = subscriptionContext.summary.entitlements.jobTypeLimit;
+  if (limit === null || limit === undefined) return;
+
+  const currentCount = await countJobTypesForUser(userId);
+  if (currentCount < limit) return;
+
+  const error = new Error(
+    `The Free plan includes up to ${limit} custom job types. Delete an unused job type or upgrade to Starter for unlimited job types.`
+  );
+  error.statusCode = 403;
+  error.code = "JOB_TYPE_LIMIT_REACHED";
+  error.subscription = subscriptionContext.summary;
+  throw error;
+};
+
 const ensureJobTypeForJob = async (userId, payload) => {
   const jobTypeId = payload.jobTypeId ? Number(payload.jobTypeId) : null;
   const jobTypeName = normalizeJobTypeName(payload.jobType);
@@ -782,6 +793,9 @@ const ensureJobTypeForJob = async (userId, payload) => {
   if (existing) {
     return existing;
   }
+
+  const subscriptionContext = await getSubscriptionContextForUser(userId);
+  await assertCanCreateJobType(subscriptionContext, userId);
 
   const color = jobTypeColor || buildColorFromName(jobTypeName);
   const sortOrder = await getNextJobTypeSortOrder(userId);
@@ -944,7 +958,6 @@ app.post(
 
       const [insertResult] = await db.promise().query(insertQuery, [username, email, hashedPassword]);
       if (insertResult?.insertId) {
-        await seedDefaultJobTypesForUser(insertResult.insertId);
         await seedDefaultSubscriptionForUser(insertResult.insertId);
       }
       return res.status(201).json({ message: "Account created successfully" });
@@ -1186,7 +1199,6 @@ app.post(
 
     try {
       const subscriptionContext = await getSubscriptionContextForUser(userId);
-      jobType = await ensureJobTypeForJob(userId, req.body);
       const [clientRows] = await db.promise().query(
         `
           SELECT DISTINCT c.id
@@ -1206,6 +1218,7 @@ app.post(
         createsClient,
         createsJob: true
       });
+      jobType = await ensureJobTypeForJob(userId, req.body);
 
       await db.promise().query("START TRANSACTION");
       transactionStarted = true;
@@ -1256,7 +1269,11 @@ app.post(
       if (transactionStarted) {
         await db.promise().query("ROLLBACK");
       }
-      if (error.code === "PLAN_LIMIT_REACHED" || error.code === "FEATURE_NOT_AVAILABLE") {
+      if (
+        error.code === "PLAN_LIMIT_REACHED" ||
+        error.code === "FEATURE_NOT_AVAILABLE" ||
+        error.code === "JOB_TYPE_LIMIT_REACHED"
+      ) {
         return res.status(error.statusCode || 403).json({
           error: error.message,
           code: error.code,
@@ -1609,17 +1626,19 @@ app.post(
     const name = normalizeJobTypeName(req.body.name);
     const normalizedName = normalizeJobTypeKey(name);
     const color = normalizeHexColor(req.body.color) || buildColorFromName(name);
-    const sortOrder =
-      req.body.sortOrder !== undefined && req.body.sortOrder !== null
-        ? Number(req.body.sortOrder)
-        : await getNextJobTypeSortOrder(req.user.id);
 
     try {
-      await ensurePlanAllowsJobTypeManagement(req.user.id);
       const existing = await fetchJobTypeByName(req.user.id, name);
       if (existing) {
         return res.status(409).json({ error: "Job type already exists" });
       }
+
+      const subscriptionContext = await ensurePlanAllowsJobTypeManagement(req.user.id);
+      await assertCanCreateJobType(subscriptionContext, req.user.id);
+      const sortOrder =
+        req.body.sortOrder !== undefined && req.body.sortOrder !== null
+          ? Number(req.body.sortOrder)
+          : await getNextJobTypeSortOrder(req.user.id);
 
       const [result] = await db.promise().query(
         `
@@ -1633,7 +1652,7 @@ app.post(
       return res.status(201).json(created);
     } catch (error) {
       console.error("Error creating job type:", error);
-      if (error.code === "FEATURE_NOT_AVAILABLE") {
+      if (error.code === "FEATURE_NOT_AVAILABLE" || error.code === "JOB_TYPE_LIMIT_REACHED") {
         return res.status(error.statusCode || 403).json({
           error: error.message,
           code: error.code,
@@ -1862,7 +1881,11 @@ app.put(
         jobValues.push(jobType.name);
       }
     } catch (error) {
-      return res.status(error.statusCode || 400).json({ error: error.message || "Invalid job type" });
+      return res.status(error.statusCode || 400).json({
+        error: error.message || "Invalid job type",
+        code: error.code || undefined,
+        subscription: error.subscription || undefined
+      });
     }
 
     if (jobUpdates.length === 0 && clientUpdates.length === 0) {
