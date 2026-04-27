@@ -11,14 +11,13 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
-  StatusBar as NativeStatusBar,
   Text,
   TextInput,
   View
 } from 'react-native'
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import {
   API_BASE,
   APP_WEB_BASE,
@@ -54,7 +53,6 @@ const PHONE_EXAMPLE = '(555) 123-4567'
 const KEYBOARD_SCROLL_DELAY_MS = Platform.OS === 'ios' ? 80 : 140
 const AUTH_KEYBOARD_EXTRA_OFFSET = 96
 const WORKSPACE_KEYBOARD_EXTRA_OFFSET = 120
-const DEVICE_STATUS_BAR_OFFSET = Platform.OS === 'android' ? NativeStatusBar.currentHeight || 0 : 0
 const DEFAULT_JOB_DURATION_MINUTES = 60
 const DAY_TIMELINE_DEFAULT_START_HOUR = 8
 const DAY_TIMELINE_DEFAULT_END_HOUR = 18
@@ -715,7 +713,7 @@ const getApiErrorMessage = (payload, fallback) =>
   payload?.error || payload?.message || payload?.errors?.[0]?.msg || fallback
 
 
-export default function App() {
+function AppContent() {
   const authScrollRef = useRef(null)
   const workspaceScrollRef = useRef(null)
   const focusedInputRef = useRef({ area: null, target: null })
@@ -2830,6 +2828,14 @@ export default function App() {
   )
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  )
+}
+
 function Panel({ title, subtitle, children }) {
   return (
     <View style={commonStyles.panel}>
@@ -3481,7 +3487,7 @@ const styles = StyleSheet.create({
     flexGrow: 1
   },
   authScrollContentForm: {
-    paddingTop: DEVICE_STATUS_BAR_OFFSET
+    paddingTop: 0
   },
   authBackdrop: {
     flex: 1,
@@ -3757,7 +3763,7 @@ const styles = StyleSheet.create({
   keyboardFrame: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   workspaceContent: {
-    paddingTop: DEVICE_STATUS_BAR_OFFSET + 14
+    paddingTop: 14
   },
   workspaceOverview: {
     flexDirection: 'row',
